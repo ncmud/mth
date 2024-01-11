@@ -38,7 +38,7 @@ Client side MCCP3 support is currently only supported by TinTin++.
 Add the following to your Package.swift:
 
 ```swift
-.package(url: "https://github.com/ncmud/mth.git", branch: "spm")
+.package(url: "https://github.com/ncmud/mth.git", branch: "trunk")
 ```
 
 Incorporate "mth" into your targets dependencies:
