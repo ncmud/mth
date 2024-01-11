@@ -31,6 +31,9 @@ Client side MCCP3 support is currently only supported by TinTin++.
 ## Building standalone
 
 `$ cd Sources/mth`
+
+and build the binary:
+
 `$ make .`
 
 ## Incorporating via SPM
