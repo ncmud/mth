@@ -286,4 +286,4 @@ char *alphabet_fgc_bold[26] =
     "", "<ff80>", "<ff08>", "", "<ff00>", "<fddd>", "<fdb0>", "", "<f80f>", "<ffff>", "", "<fff0>", ""
 };
 
-#mthcolor_h /* mthcolor_h */
+#endif /* mthcolor_h */
