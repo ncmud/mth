@@ -1,3 +1,5 @@
+[![C CI](https://github.com/ncmud/mth/actions/workflows/c.yml/badge.svg)](https://github.com/ncmud/mth/actions/workflows/c.yml) [![Swift](https://github.com/ncmud/mth/actions/workflows/swift.yml/badge.svg)](https://github.com/ncmud/mth/actions/workflows/swift.yml)
+
 # MTH (Mud Telopt Handler)
 
 Telnet handler which supports the
