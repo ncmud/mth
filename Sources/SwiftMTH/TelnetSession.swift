@@ -28,10 +28,22 @@ public final class TelnetSession {
     /// The MSDP variable definitions to use when MSDP is initialized.
     public let msdpTable: [MSDPVariableDefinition]
 
+    /// Whether MCCP2 compression is active for outbound data.
+    public var isMCCP2Active: Bool { mccp2 != nil }
+
+    /// Whether MCCP3 decompression is active for inbound data.
+    public var isMCCP3Active: Bool { mccp3 != nil }
+
     // MARK: - Private State
 
     /// Buffer for incomplete telnet sequences (packet fragmentation).
     private var telbuf: [UInt8] = []
+
+    /// MCCP2 deflate stream (server→client output compression).
+    private var mccp2: DeflateStream?
+
+    /// MCCP3 inflate stream (client→server input decompression).
+    private var mccp3: InflateStream?
 
     // MARK: - Init
 
@@ -65,6 +77,8 @@ public final class TelnetSession {
 
     /// Unannounce support (e.g. before copyover).
     public func unannounceSupport() {
+        endMCCP2()
+        endMCCP3()
         for i in 0..<min(telnetTable.count, 255) {
             let entry = telnetTable[i]
             if !entry.announce.isEmpty {
@@ -110,6 +124,25 @@ public final class TelnetSession {
     /// Equivalent to C `translate_telopts`.
     public func processInput(_ src: [UInt8]) -> [UInt8] {
         var input = src
+
+        // MCCP3: decompress incoming data if active
+        if let inflater = mccp3 {
+            guard let result = inflater.decompress(input) else {
+                log("MCCP3: Compression error, disabling MCCP3.")
+                write([TC.IAC, TC.DONT, TO.MCCP3])
+                endMCCP3()
+                return []
+            }
+            if result.finished {
+                log("MCCP3: Compression end, disabling MCCP3.")
+                endMCCP3()
+                // Decompressed data + any trailing uncompressed data
+                input = result.decompressed + result.unconsumedInput
+            } else {
+                input = result.decompressed
+            }
+        }
+
         var out: [UInt8] = []
         out.reserveCapacity(input.count)
 
@@ -232,17 +265,17 @@ public final class TelnetSession {
         TeloptPattern(pattern: [TC.IAC, TC.SB, TO.GMCP],
                       handler: { s, src, i, n in s.processSbGmcp(src, at: i, srclen: n) }),
 
-        // MCCP2 - placeholders for Phase 5
+        // MCCP2
         TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MCCP2],
                       handler: { s, src, i, n in s.processDoMccp2(); return 3 }),
         TeloptPattern(pattern: [TC.IAC, TC.DONT, TO.MCCP2],
                       handler: { s, src, i, n in s.processDontMccp2(); return 3 }),
 
-        // MCCP3 - placeholders for Phase 5
+        // MCCP3
         TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MCCP3],
                       handler: { s, src, i, n in return 3 }),
         TeloptPattern(pattern: [TC.IAC, TC.SB, TO.MCCP3, TC.IAC, TC.SE],
-                      handler: { s, src, i, n in return 5 }),
+                      handler: { s, src, i, n in s.processSbMccp3(); return 5 }),
     ]
 
     /// Handle generic telnet commands that don't match any specific pattern.
@@ -289,6 +322,17 @@ public final class TelnetSession {
     // MARK: - Output
 
     private func write(_ data: [UInt8]) {
+        if let mccp2 = mccp2 {
+            if let compressed = mccp2.compress(data) {
+                delegate?.telnetSession(self, write: compressed)
+            }
+        } else {
+            delegate?.telnetSession(self, write: data)
+        }
+    }
+
+    /// Write data bypassing MCCP2 compression (used for the MCCP2 start marker).
+    private func writeRaw(_ data: [UInt8]) {
         delegate?.telnetSession(self, write: data)
     }
 
@@ -641,13 +685,65 @@ public final class TelnetSession {
         return sbLen
     }
 
-    // MARK: - Handler: MCCP (Phase 5 stubs)
+    // MARK: - Handler: MCCP2
 
     private func processDoMccp2() {
-        // TODO: Phase 5 — start MCCP2 compression
+        startMCCP2()
     }
 
     private func processDontMccp2() {
-        // TODO: Phase 5 — end MCCP2 compression
+        endMCCP2()
+    }
+
+    /// Start MCCP2 compression. Sends the start marker uncompressed,
+    /// then all subsequent write() calls are compressed.
+    private func startMCCP2() {
+        guard mccp2 == nil else { return }
+        guard let stream = DeflateStream() else {
+            log("MCCP2: failed to initialize deflate stream")
+            return
+        }
+
+        // Send the MCCP2 start marker BEFORE enabling compression
+        writeRaw([TC.IAC, TC.SB, TO.MCCP2, TC.IAC, TC.SE])
+
+        mccp2 = stream
+    }
+
+    /// End MCCP2 compression.
+    public func endMCCP2() {
+        guard let stream = mccp2 else { return }
+
+        // Flush remaining compressed data
+        if !commFlags.contains(.disconnect) {
+            if let final = stream.finish() {
+                delegate?.telnetSession(self, write: final)
+            }
+        }
+
+        mccp2 = nil
+        log("MCCP2: COMPRESSION END")
+    }
+
+    // MARK: - Handler: MCCP3
+
+    private func processSbMccp3() {
+        endMCCP3()
+
+        guard let stream = InflateStream() else {
+            log("INFO IAC SB MCCP3 FAILED TO INITIALIZE")
+            write([TC.IAC, TC.WONT, TO.MCCP3])
+            return
+        }
+
+        mccp3 = stream
+        log("INFO IAC SB MCCP3 INITIALIZED")
+    }
+
+    /// End MCCP3 decompression.
+    public func endMCCP3() {
+        guard mccp3 != nil else { return }
+        log("MCCP3: COMPRESSION END")
+        mccp3 = nil
     }
 }

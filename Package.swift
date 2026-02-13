@@ -10,10 +10,15 @@ let package = Package(
         .library(name: "Cmth", targets: ["Cmth"]),
         .library(name: "CmthColor", targets: ["CmthColor"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/tsolomko/SWCompression.git", from: "4.8.0"),
-    ],
     targets: [
+        // Thin C wrapper exposing system zlib to Swift.
+        // zlib is present on macOS (SDK) and Linux (Swift toolchain dependency).
+        .target(
+            name: "CZlib",
+            path: "Sources/CZlib",
+            publicHeadersPath: "include",
+            linkerSettings: [.linkedLibrary("z")]
+        ),
         // Existing C targets (renamed)
         .target(
             name: "Cmth",
@@ -34,9 +39,7 @@ let package = Package(
         // New Swift targets
         .target(
             name: "MTH",
-            dependencies: [
-                .product(name: "SWCompression", package: "SWCompression"),
-            ],
+            dependencies: ["CZlib"],
             path: "Sources/SwiftMTH"
         ),
         .target(

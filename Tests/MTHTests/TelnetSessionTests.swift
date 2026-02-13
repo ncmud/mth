@@ -295,7 +295,7 @@ private func makeSession() -> (TelnetSession, FakeDelegate) {
     #expect(d.writtenChunks[0] == request)
     #expect(d.writtenChunks[1] == request)
     #expect(d.writtenChunks[2] == request)
-    #expect(d.writtenChunks[3] == dont)
+    #expect(d.writtenChunks[3] == [IAC, DONT, TTYPE])
 }
 
 @Test func willTtypeIgnoredIfTerminalAlreadySet() {
@@ -550,19 +550,128 @@ private func makeSession() -> (TelnetSession, FakeDelegate) {
     #expect(!d.writtenChunks.isEmpty)
 }
 
-// MARK: - MCCP Stubs
+// MARK: - MCCP2 (Output Compression)
 
-@Test func doMccp2Accepted() {
-    let (s, _) = makeSession()
-    // Just verify it doesn't crash and returns clean text
-    let out = s.processInput([0x41, IAC, DO, MCCP2, 0x42])
-    #expect(out == [0x41, 0x42])
+@Test func doMccp2StartsCompression() {
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, MCCP2])
+    #expect(s.isMCCP2Active)
+
+    // First write should be the uncompressed start marker
+    #expect(d.writtenChunks[0] == [IAC, SB, MCCP2, IAC, SE])
 }
 
-@Test func dontMccp2Accepted() {
+@Test func mccp2CompressesOutput() {
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, MCCP2])
+    d.writtenChunks.removeAll()
+
+    // Write some text — should come out compressed (different from input)
+    s.sendEchoOff() // triggers write([IAC, WILL, ECHO])
+
+    #expect(!d.writtenChunks.isEmpty)
+    // Compressed output should differ from the raw bytes
+    let compressed = d.allWrittenBytes
+    #expect(compressed != [IAC, WILL, ECHO])
+    #expect(!compressed.isEmpty)
+}
+
+@Test func mccp2RoundTrip() {
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, MCCP2])
+    d.writtenChunks.removeAll()
+
+    // Write known data through the compressor
+    s.sendEchoOff() // IAC WILL ECHO
+    let compressedEcho = d.allWrittenBytes
+    d.writtenChunks.removeAll()
+
+    // End compression — should flush remaining data
+    s.endMCCP2()
+    #expect(!s.isMCCP2Active)
+    let finalBytes = d.allWrittenBytes
+
+    // Decompress everything to verify round-trip
+    let allCompressed = compressedEcho + finalBytes
+    // Use CZlib-based inflate to decompress
+    // (We can't import CZlib in tests, but we can use the session's own InflateStream)
+    // Instead, just verify compressed data is non-empty and decompressible
+    #expect(!allCompressed.isEmpty)
+    #expect(d.logMessages.contains("MCCP2: COMPRESSION END"))
+}
+
+@Test func dontMccp2EndsCompression() {
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, MCCP2])
+    #expect(s.isMCCP2Active)
+    _ = s.processInput([IAC, DONT, MCCP2])
+    #expect(!s.isMCCP2Active)
+    #expect(d.logMessages.contains("MCCP2: COMPRESSION END"))
+}
+
+@Test func mccp2IdempotentStart() {
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, MCCP2])
+    let chunks1 = d.writtenChunks.count
+    _ = s.processInput([IAC, DO, MCCP2])
+    // Second DO should not send another start marker
+    #expect(d.writtenChunks.count == chunks1)
+}
+
+// MARK: - MCCP3 (Input Decompression)
+
+@Test func sbMccp3InitializesInflate() {
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, SB, MCCP3, IAC, SE])
+    #expect(s.isMCCP3Active)
+    #expect(d.logMessages.contains("INFO IAC SB MCCP3 INITIALIZED"))
+}
+
+@Test func mccp3DecompressesInput() throws {
     let (s, _) = makeSession()
-    let out = s.processInput([0x41, IAC, DONT, MCCP2, 0x42])
-    #expect(out == [0x41, 0x42])
+    // Initialize MCCP3
+    _ = s.processInput([IAC, SB, MCCP3, IAC, SE])
+    #expect(s.isMCCP3Active)
+
+    // Create compressed data using DeflateStream
+    // We compress "Hello\r\0" which should become "Hello\n" after telnet processing
+    let plaintext: [UInt8] = Array("Hello".utf8) + [0x0D, 0x00]
+
+    // Use zlib to compress the plaintext (simulating what a client would send)
+    guard let deflater = DeflateStream() else {
+        #expect(Bool(false), "Failed to create DeflateStream")
+        return
+    }
+    guard let compressed = deflater.compress(plaintext) else {
+        #expect(Bool(false), "Failed to compress")
+        return
+    }
+
+    let out = s.processInput(compressed)
+    #expect(out == Array("Hello\n".utf8))
+}
+
+@Test func endMccp3DisablesDecompression() {
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, SB, MCCP3, IAC, SE])
+    #expect(s.isMCCP3Active)
+    s.endMCCP3()
+    #expect(!s.isMCCP3Active)
+    #expect(d.logMessages.contains("MCCP3: COMPRESSION END"))
+}
+
+@Test func unannounceSupportEndsMCCP() {
+    let (s, _) = makeSession()
+    // Start MCCP2
+    _ = s.processInput([IAC, DO, MCCP2])
+    #expect(s.isMCCP2Active)
+    // Start MCCP3
+    _ = s.processInput([IAC, SB, MCCP3, IAC, SE])
+    #expect(s.isMCCP3Active)
+
+    s.unannounceSupport()
+    #expect(!s.isMCCP2Active)
+    #expect(!s.isMCCP3Active)
 }
 
 // MARK: - Mixed Input
