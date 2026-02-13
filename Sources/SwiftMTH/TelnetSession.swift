@@ -343,6 +343,14 @@ public final class TelnetSession {
 
     // MARK: - Output
 
+    /// Send output data to the client, compressing via MCCP2 if active.
+    /// Host applications must route all socket output through this method
+    /// once MCCP2 negotiation completes, otherwise clients receive
+    /// uncompressed data after the MCCP2 start marker.
+    public func sendOutput(_ data: [UInt8]) {
+        write(data)
+    }
+
     private func write(_ data: [UInt8]) {
         #if canImport(CZlib)
         if let mccp2 = mccp2 {

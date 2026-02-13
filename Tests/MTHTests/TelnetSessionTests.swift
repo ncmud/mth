@@ -619,6 +619,30 @@ private func makeSession() -> (TelnetSession, FakeDelegate) {
     #expect(d.writtenChunks.count == chunks1)
 }
 
+// MARK: - sendOutput (Public Output API)
+
+@Test func sendOutputPassthroughWithoutMCCP2() {
+    let (s, d) = makeSession()
+    let data: [UInt8] = Array("Hello, World!\r\n".utf8)
+    s.sendOutput(data)
+    #expect(d.allWrittenBytes == data)
+}
+
+@Test func sendOutputCompressesWithMCCP2() {
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, MCCP2])
+    d.writtenChunks.removeAll()
+
+    let data: [UInt8] = Array("Hello, World!\r\n".utf8)
+    s.sendOutput(data)
+
+    #expect(!d.writtenChunks.isEmpty)
+    // Compressed output should differ from the raw input
+    let compressed = d.allWrittenBytes
+    #expect(compressed != data)
+    #expect(!compressed.isEmpty)
+}
+
 // MARK: - MCCP3 (Input Decompression)
 
 @Test func sbMccp3InitializesInflate() {
