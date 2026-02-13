@@ -1,3 +1,4 @@
+#if canImport(CmthColor)
 import Testing
 import CmthColor
 import MTHColor
@@ -141,3 +142,4 @@ private func assertOracleMatch(_ input: String, depth: ColorDepth, sourceLocatio
         assertOracleMatch("<FABC><BDEF>truemix", depth: depth)
     }
 }
+#endif

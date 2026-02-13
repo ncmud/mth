@@ -1,3 +1,4 @@
+#if canImport(Cmth)
 import Testing
 import Cmth
 import MTH
@@ -172,3 +173,4 @@ private func gmcpPacket(_ payload: [UInt8]) -> [UInt8] {
     let cBackToMsdp = cJson2Msdp(cJson)
     #expect(backToMsdp == cBackToMsdp, "Round-trip mismatch")
 }
+#endif
