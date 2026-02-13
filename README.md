@@ -2,8 +2,7 @@
 
 # MTH (Mud Telopt Handler)
 
-Telnet handler which supports the
-following TELNET options.
+A Swift library for handling telnet option negotiation in MUD servers. Supports the following telnet options:
 
 ```
 CHARSET      - Reports the character sets supported by the client.
@@ -20,40 +19,75 @@ NEW_ENVIRON  - Reports various system variables.
 TTYPE        - Reports the client's terminal type.
 ```
 
-MTH has a permissive license, just leave the copyright notice in the
-original sources, otherwise you can do as you please with it.
+Also includes `MTHColor`, a color code substitution library supporting ANSI-16, xterm-256, and true color output.
 
-MTH will run stand alone and by default opens a connection on port
-4321 to which a telnet / mud client can connect. This is primarily
-there so you can test the code and provide you with an example
-implementation.
+## Usage
 
-Client side MCCP3 support is currently only supported by TinTin++.
-
-## Building standalone
-
-`$ cd Sources/mth`
-
-and build the binary:
-
-`$ make .`
-
-## Incorporating via SPM
-
-Add the following to your Package.swift:
+Add the dependency to your `Package.swift`:
 
 ```swift
 .package(url: "https://github.com/ncmud/mth.git", branch: "trunk")
 ```
 
-Incorporate "mth" into your targets dependencies:
+Then add the libraries you need:
 
 ```swift
 .target(
     name: "MyTarget",
     dependencies: [
-        "mth",
+        .product(name: "MTH", package: "mth"),
+        .product(name: "MTHColor", package: "mth"),
     ]
 ),
 ```
 
+### TelnetSession
+
+```swift
+import MTH
+
+class MyConnection: TelnetSessionDelegate {
+    let session: TelnetSession
+
+    init() {
+        session = TelnetSession(delegate: self)
+        session.announceSupport()
+    }
+
+    // Called when the session has bytes to send to the client
+    func telnetSession(_ session: TelnetSession, write data: [UInt8]) {
+        socket.write(data)
+    }
+
+    // Called when the session wants to log a message
+    func telnetSession(_ session: TelnetSession, log message: String) {
+        print(message)
+    }
+
+    // Return MSSP key-value pairs for server status reporting
+    func telnetSessionMSSPData(_ session: TelnetSession) -> [String: String] {
+        ["NAME": "My MUD", "PLAYERS": "42"]
+    }
+
+    func onDataReceived(_ raw: [UInt8]) {
+        let clean = session.processInput(raw)
+        // clean contains user text with telnet sequences stripped
+    }
+}
+```
+
+### Color Substitution
+
+```swift
+import MTHColor
+
+let output = substituteColor("^RBold Red ^ggreen^x", depth: .trueColor)
+```
+
+## Platforms
+
+macOS and Linux. Requires system zlib (present in macOS SDK and as a Swift toolchain dependency on Linux).
+
+## License
+
+Permissive license. Keep the copyright notice in the original sources; otherwise do as you please.
