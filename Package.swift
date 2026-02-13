@@ -1,31 +1,57 @@
-// swift-tools-version:5.7.1
+// swift-tools-version:6.0
 import PackageDescription
 
 let package = Package(
     name: "mth",
     products: [
-        .library(
-            name: "mth",
-            targets: ["mth"]),
-        .library(
-            name: "mthcolor",
-            targets: ["mthcolor"]),
+        .library(name: "MTH", targets: ["MTH"]),
+        .library(name: "MTHColor", targets: ["MTHColor"]),
+        // C targets retained as oracle for testing
+        .library(name: "Cmth", targets: ["Cmth"]),
+        .library(name: "CmthColor", targets: ["CmthColor"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/tsolomko/SWCompression.git", from: "4.8.0"),
     ],
     targets: [
+        // Existing C targets (renamed)
         .target(
-            name: "mth",
+            name: "Cmth",
             dependencies: [],
-            path: "Sources/mth",
-            sources: ["msdp.c", "mth.c", "telopt.c", "net.c", "mud.c"],
-            publicHeadersPath: "./"
+            path: "Sources/cmth",
+            sources: ["msdp.c", "mth.c", "telopt.c", "mud.c"],
+            publicHeadersPath: "./",
+            cSettings: [.define("MTH_LIBRARY")]
         ),
         .target(
-            name: "mthcolor",
+            name: "CmthColor",
             dependencies: [],
-            path: "Sources/color",
+            path: "Sources/cmthcolor",
             sources: ["color.c"],
-            publicHeadersPath: "./"
-        )
+            publicHeadersPath: "./",
+            cSettings: [.define("MTH_LIBRARY")]
+        ),
+        // New Swift targets
+        .target(
+            name: "MTH",
+            dependencies: [
+                .product(name: "SWCompression", package: "SWCompression"),
+            ],
+            path: "Sources/SwiftMTH"
+        ),
+        .target(
+            name: "MTHColor",
+            dependencies: [],
+            path: "Sources/SwiftMTHColor"
+        ),
+        // Test targets
+        .testTarget(
+            name: "MTHTests",
+            dependencies: ["MTH", "Cmth"]
+        ),
+        .testTarget(
+            name: "MTHColorTests",
+            dependencies: ["MTHColor", "CmthColor"]
+        ),
     ]
 )
-

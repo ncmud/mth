@@ -1,6 +1,9 @@
 #ifndef mthcolor_h
 #define mthcolor_h
 
+#include <stdio.h>
+#include <stdlib.h>
+
 // Make sure that the output buffer is 6 times larger than the input buffer.
 
 // colors should either be

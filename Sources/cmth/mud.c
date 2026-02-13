@@ -27,6 +27,7 @@ void log_printf(char *fmt, ...)
 	return;
 }
 
+#ifndef MTH_LIBRARY
 /*
 	Call translate_telopts() in telopt.c with an MSSP request.
 */
@@ -49,6 +50,7 @@ int main(int argc, char **argv)
 
 	return 0;
 }
+#endif
 
 
 int write_to_descriptor(DESCRIPTOR_DATA *d, char *txt, int length)

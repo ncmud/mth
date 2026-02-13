@@ -1,3 +1,6 @@
+#ifndef mud_h
+#define mud_h
+
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -99,4 +102,6 @@ int port_new(int s);
 */
 
 int         recv_sb_mssp             ( unsigned char *src, int srclen );
+
+#endif /* mud_h */
 

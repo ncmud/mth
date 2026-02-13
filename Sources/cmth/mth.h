@@ -1,4 +1,5 @@
 #include <zlib.h>
+#include "mud.h"
 
 typedef struct mth_data           MTH_DATA;
 typedef struct mud_data           MUD_DATA;

@@ -116,6 +116,7 @@ int substitute_color(char *input, char *output, int colors)
 	return pto - output;
 }
 
+#ifndef MTH_LIBRARY
 int main(int argc, char **argv)
 {
 	char in[2000], out[12000];
@@ -189,3 +190,4 @@ int main(int argc, char **argv)
 
 	return 0;
 }
+#endif
