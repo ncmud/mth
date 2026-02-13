@@ -1,2 +1,2 @@
 // MTH — Mud Telopt Handler (Swift)
-// Placeholder for Phase 1+
+// Phase 5 (MCCP compression) pending.
