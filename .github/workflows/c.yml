@@ -11,5 +11,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: make
-      run: cd Sources/cmth && make
+    - name: Build C targets
+      run: swift build --target Cmth --target CmthColor -v
