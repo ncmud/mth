@@ -1,3 +1,4 @@
+#if canImport(CZlib)
 import CZlib
 
 /// Streaming deflate compressor for MCCP2 (server → client compression).
@@ -188,3 +189,4 @@ public final class InflateStream {
         }
     }
 }
+#endif

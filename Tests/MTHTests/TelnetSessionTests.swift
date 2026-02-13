@@ -550,6 +550,7 @@ private func makeSession() -> (TelnetSession, FakeDelegate) {
     #expect(!d.writtenChunks.isEmpty)
 }
 
+#if canImport(CZlib)
 // MARK: - MCCP2 (Output Compression)
 
 @Test func doMccp2StartsCompression() {
@@ -673,6 +674,7 @@ private func makeSession() -> (TelnetSession, FakeDelegate) {
     #expect(!s.isMCCP2Active)
     #expect(!s.isMCCP3Active)
 }
+#endif
 
 // MARK: - Mixed Input
 

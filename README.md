@@ -86,7 +86,7 @@ let output = substituteColor("^RBold Red ^ggreen^x", depth: .trueColor)
 
 ## Platforms
 
-macOS and Linux. Requires system zlib (present in macOS SDK and as a Swift toolchain dependency on Linux).
+macOS, Linux, and Windows. MCCP2/MCCP3 compression requires system zlib (present in macOS SDK and as a Swift toolchain dependency on Linux). On Windows, the library builds and runs without compression support — MCCP is compiled out and all other telnet options work normally.
 
 ## License
 

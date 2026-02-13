@@ -10,10 +10,13 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v4
+    - name: Install Swift
+      if: runner.os == 'Windows'
+      uses: SwiftyLab/setup-swift@latest
     - name: Build
       run: swift build -v
     - name: Test

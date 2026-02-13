@@ -39,7 +39,9 @@ let package = Package(
         // New Swift targets
         .target(
             name: "MTH",
-            dependencies: ["CZlib"],
+            dependencies: [
+                .target(name: "CZlib", condition: .when(platforms: [.macOS, .linux])),
+            ],
             path: "Sources/SwiftMTH"
         ),
         .target(

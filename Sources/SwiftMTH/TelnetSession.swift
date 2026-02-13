@@ -28,22 +28,32 @@ public final class TelnetSession {
     /// The MSDP variable definitions to use when MSDP is initialized.
     public let msdpTable: [MSDPVariableDefinition]
 
+    #if canImport(CZlib)
     /// Whether MCCP2 compression is active for outbound data.
     public var isMCCP2Active: Bool { mccp2 != nil }
 
     /// Whether MCCP3 decompression is active for inbound data.
     public var isMCCP3Active: Bool { mccp3 != nil }
+    #else
+    /// Whether MCCP2 compression is active for outbound data (unavailable without zlib).
+    public var isMCCP2Active: Bool { false }
+
+    /// Whether MCCP3 decompression is active for inbound data (unavailable without zlib).
+    public var isMCCP3Active: Bool { false }
+    #endif
 
     // MARK: - Private State
 
     /// Buffer for incomplete telnet sequences (packet fragmentation).
     private var telbuf: [UInt8] = []
 
+    #if canImport(CZlib)
     /// MCCP2 deflate stream (server→client output compression).
     private var mccp2: DeflateStream?
 
     /// MCCP3 inflate stream (client→server input decompression).
     private var mccp3: InflateStream?
+    #endif
 
     // MARK: - Init
 
@@ -77,8 +87,10 @@ public final class TelnetSession {
 
     /// Unannounce support (e.g. before copyover).
     public func unannounceSupport() {
+        #if canImport(CZlib)
         endMCCP2()
         endMCCP3()
+        #endif
         for i in 0..<min(telnetTable.count, 255) {
             let entry = telnetTable[i]
             if !entry.announce.isEmpty {
@@ -125,6 +137,7 @@ public final class TelnetSession {
     public func processInput(_ src: [UInt8]) -> [UInt8] {
         var input = src
 
+        #if canImport(CZlib)
         // MCCP3: decompress incoming data if active
         if let inflater = mccp3 {
             guard let result = inflater.decompress(input) else {
@@ -142,6 +155,7 @@ public final class TelnetSession {
                 input = result.decompressed
             }
         }
+        #endif
 
         var out: [UInt8] = []
         out.reserveCapacity(input.count)
@@ -230,53 +244,61 @@ public final class TelnetSession {
     }
 
     /// Lazily built telopt pattern table.
-    private lazy var teloptPatterns: [TeloptPattern] = [
-        TeloptPattern(pattern: [TC.IAC, TC.DO, TO.EOR],
-                      handler: { s, src, i, n in s.processDoEOR(); return 3 }),
+    private lazy var teloptPatterns: [TeloptPattern] = buildTeloptPatterns()
 
-        TeloptPattern(pattern: [TC.IAC, TC.WILL, TO.TTYPE],
-                      handler: { s, src, i, n in s.processWillTtype(); return 3 }),
-        TeloptPattern(pattern: [TC.IAC, TC.SB, TO.TTYPE, TS.ENV_IS],
-                      handler: { s, src, i, n in s.processSbTtypeIs(src, at: i, srclen: n) }),
+    private func buildTeloptPatterns() -> [TeloptPattern] {
+        var patterns: [TeloptPattern] = [
+            TeloptPattern(pattern: [TC.IAC, TC.DO, TO.EOR],
+                          handler: { s, src, i, n in s.processDoEOR(); return 3 }),
 
-        TeloptPattern(pattern: [TC.IAC, TC.SB, TO.NAWS],
-                      handler: { s, src, i, n in s.processSbNaws(src, at: i, srclen: n) }),
+            TeloptPattern(pattern: [TC.IAC, TC.WILL, TO.TTYPE],
+                          handler: { s, src, i, n in s.processWillTtype(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.SB, TO.TTYPE, TS.ENV_IS],
+                          handler: { s, src, i, n in s.processSbTtypeIs(src, at: i, srclen: n) }),
 
-        TeloptPattern(pattern: [TC.IAC, TC.WILL, TO.NEW_ENVIRON],
-                      handler: { s, src, i, n in s.processWillNewEnviron(); return 3 }),
-        TeloptPattern(pattern: [TC.IAC, TC.SB, TO.NEW_ENVIRON],
-                      handler: { s, src, i, n in s.processSbNewEnviron(src, at: i, srclen: n) }),
+            TeloptPattern(pattern: [TC.IAC, TC.SB, TO.NAWS],
+                          handler: { s, src, i, n in s.processSbNaws(src, at: i, srclen: n) }),
 
-        TeloptPattern(pattern: [TC.IAC, TC.DO, TO.CHARSET],
-                      handler: { s, src, i, n in s.processDoCharset(); return 3 }),
-        TeloptPattern(pattern: [TC.IAC, TC.SB, TO.CHARSET],
-                      handler: { s, src, i, n in s.processSbCharset(src, at: i, srclen: n) }),
+            TeloptPattern(pattern: [TC.IAC, TC.WILL, TO.NEW_ENVIRON],
+                          handler: { s, src, i, n in s.processWillNewEnviron(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.SB, TO.NEW_ENVIRON],
+                          handler: { s, src, i, n in s.processSbNewEnviron(src, at: i, srclen: n) }),
 
-        TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MSSP],
-                      handler: { s, src, i, n in s.processDoMssp(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.DO, TO.CHARSET],
+                          handler: { s, src, i, n in s.processDoCharset(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.SB, TO.CHARSET],
+                          handler: { s, src, i, n in s.processSbCharset(src, at: i, srclen: n) }),
 
-        TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MSDP],
-                      handler: { s, src, i, n in s.processDoMsdp(); return 3 }),
-        TeloptPattern(pattern: [TC.IAC, TC.SB, TO.MSDP],
-                      handler: { s, src, i, n in s.processSbMsdp(src, at: i, srclen: n) }),
+            TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MSSP],
+                          handler: { s, src, i, n in s.processDoMssp(); return 3 }),
 
-        TeloptPattern(pattern: [TC.IAC, TC.DO, TO.GMCP],
-                      handler: { s, src, i, n in s.processDoGmcp(); return 3 }),
-        TeloptPattern(pattern: [TC.IAC, TC.SB, TO.GMCP],
-                      handler: { s, src, i, n in s.processSbGmcp(src, at: i, srclen: n) }),
+            TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MSDP],
+                          handler: { s, src, i, n in s.processDoMsdp(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.SB, TO.MSDP],
+                          handler: { s, src, i, n in s.processSbMsdp(src, at: i, srclen: n) }),
 
-        // MCCP2
-        TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MCCP2],
-                      handler: { s, src, i, n in s.processDoMccp2(); return 3 }),
-        TeloptPattern(pattern: [TC.IAC, TC.DONT, TO.MCCP2],
-                      handler: { s, src, i, n in s.processDontMccp2(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.DO, TO.GMCP],
+                          handler: { s, src, i, n in s.processDoGmcp(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.SB, TO.GMCP],
+                          handler: { s, src, i, n in s.processSbGmcp(src, at: i, srclen: n) }),
+        ]
+        #if canImport(CZlib)
+        patterns += [
+            // MCCP2
+            TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MCCP2],
+                          handler: { s, src, i, n in s.processDoMccp2(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.DONT, TO.MCCP2],
+                          handler: { s, src, i, n in s.processDontMccp2(); return 3 }),
 
-        // MCCP3
-        TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MCCP3],
-                      handler: { s, src, i, n in return 3 }),
-        TeloptPattern(pattern: [TC.IAC, TC.SB, TO.MCCP3, TC.IAC, TC.SE],
-                      handler: { s, src, i, n in s.processSbMccp3(); return 5 }),
-    ]
+            // MCCP3
+            TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MCCP3],
+                          handler: { s, src, i, n in return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.SB, TO.MCCP3, TC.IAC, TC.SE],
+                          handler: { s, src, i, n in s.processSbMccp3(); return 5 }),
+        ]
+        #endif
+        return patterns
+    }
 
     /// Handle generic telnet commands that don't match any specific pattern.
     private func handleGenericTelnet(_ src: [UInt8], at i: Int, remaining: Int, out: inout [UInt8]) -> Int {
@@ -322,6 +344,7 @@ public final class TelnetSession {
     // MARK: - Output
 
     private func write(_ data: [UInt8]) {
+        #if canImport(CZlib)
         if let mccp2 = mccp2 {
             if let compressed = mccp2.compress(data) {
                 delegate?.telnetSession(self, write: compressed)
@@ -329,6 +352,9 @@ public final class TelnetSession {
         } else {
             delegate?.telnetSession(self, write: data)
         }
+        #else
+        delegate?.telnetSession(self, write: data)
+        #endif
     }
 
     /// Write data bypassing MCCP2 compression (used for the MCCP2 start marker).
@@ -685,6 +711,7 @@ public final class TelnetSession {
         return sbLen
     }
 
+    #if canImport(CZlib)
     // MARK: - Handler: MCCP2
 
     private func processDoMccp2() {
@@ -746,4 +773,11 @@ public final class TelnetSession {
         log("MCCP3: COMPRESSION END")
         mccp3 = nil
     }
+    #else
+    /// No-op: MCCP2 unavailable without zlib.
+    public func endMCCP2() {}
+
+    /// No-op: MCCP3 unavailable without zlib.
+    public func endMCCP3() {}
+    #endif
 }
