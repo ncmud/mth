@@ -128,6 +128,19 @@ public final class TelnetSession {
         msdpManager?.flushUpdates()
     }
 
+    /// Send a GMCP packet with the given module name and JSON payload.
+    /// Only sends if the client negotiated GMCP.
+    public func sendGMCP(_ module: String, json: String) {
+        guard commFlags.contains(.gmcp) else { return }
+        var packet: [UInt8] = [TC.IAC, TC.SB, TO.GMCP]
+        packet.append(contentsOf: module.utf8)
+        packet.append(UInt8(ascii: " "))
+        packet.append(contentsOf: json.utf8)
+        packet.append(TC.IAC)
+        packet.append(TC.SE)
+        write(packet)
+    }
+
     // MARK: - Input Processing
 
     /// Process raw input from the client. Strips telnet negotiations,
