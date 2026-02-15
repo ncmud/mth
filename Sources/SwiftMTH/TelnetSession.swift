@@ -104,6 +104,12 @@ public final class TelnetSession {
         }
     }
 
+    /// Re-send IAC WILL GMCP to the client. Uses the internal write path
+    /// so MCCP2 compression is handled correctly.
+    public func reannounceGMCP() {
+        write([TC.IAC, TC.WILL, TO.GMCP])
+    }
+
     /// Send echo-off (password mode).
     public func sendEchoOff() {
         commFlags.insert(.password)
