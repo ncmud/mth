@@ -639,6 +639,13 @@ public final class TelnetSession {
         log("INFO MSDP INITIALIZED")
     }
 
+    /// Initialize MSDP manager for copyover restore (no negotiation announcements).
+    public func initializeMSDPForRestore(usesGMCP: Bool) {
+        guard msdpManager == nil else { return }
+        initializeMSDP()
+        msdpManager?.usesGMCP = usesGMCP
+    }
+
     private func initializeMSDP() {
         msdpManager = MSDPManager(
             table: msdpTable,
