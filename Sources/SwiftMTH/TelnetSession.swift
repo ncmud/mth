@@ -679,9 +679,13 @@ public final class TelnetSession {
     // MARK: - Handler: GMCP
 
     private func processDoGmcp() {
-        if msdpManager != nil { return }
-        log("INFO MSDP OVER GMCP INITIALIZED")
         commFlags.insert(.gmcp)
+        if msdpManager != nil {
+            msdpManager?.usesGMCP = true
+            log("INFO GMCP ENABLED (MSDP already active)")
+            return
+        }
+        log("INFO MSDP OVER GMCP INITIALIZED")
         initializeMSDP()
     }
 
