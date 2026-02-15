@@ -67,6 +67,28 @@ public final class TelnetSession {
         self.msdpTable = msdpTable
     }
 
+    /// Restore a TelnetSession from saved copyover state.
+    /// Sets negotiated flags directly without sending announcements to the client.
+    public init(
+        restoring commFlags: CommFlags,
+        mttsFlags: MTTSFlags,
+        terminalType: String,
+        windowSize: (cols: Int, rows: Int),
+        proxy: String,
+        delegate: TelnetSessionDelegate? = nil,
+        telnetTable: [TelnetOptionEntry] = defaultTelnetTable,
+        msdpTable: [MSDPVariableDefinition] = defaultMSDPTable
+    ) {
+        self.delegate = delegate
+        self.telnetTable = telnetTable
+        self.msdpTable = msdpTable
+        self.commFlags = commFlags
+        self.mttsFlags = mttsFlags
+        self.terminalType = terminalType
+        self.windowSize = windowSize
+        self.proxy = proxy
+    }
+
     // MARK: - Connection Lifecycle
 
     /// Announce support for negotiated telnet options.

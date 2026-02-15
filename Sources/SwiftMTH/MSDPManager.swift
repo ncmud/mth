@@ -71,6 +71,27 @@ public final class MSDPManager {
         nameIndex[name]
     }
 
+    // MARK: - Copyover Support
+
+    /// Names of variables currently marked as reported (for copyover snapshot).
+    public var reportedVariableNames: [String] {
+        var names: [String] = []
+        for idx in 0..<definitions.count {
+            if state[idx].flags.contains(.reported) {
+                names.append(definitions[idx].name)
+            }
+        }
+        return names
+    }
+
+    /// Restore reported variable flags from a list of variable names (after copyover).
+    public func restoreReportedVariables(_ names: [String]) {
+        for name in names {
+            guard let idx = findIndex(name) else { continue }
+            state[idx].flags.insert(.reported)
+        }
+    }
+
     // MARK: - Reading
 
     /// Get the current value of a variable, or nil if unknown.
