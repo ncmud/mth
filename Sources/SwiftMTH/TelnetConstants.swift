@@ -106,7 +106,7 @@ public let defaultTelnetTable: [TelnetOptionEntry] = {
     table[70]  = TelnetOptionEntry("MSSP", .will)
     table[86]  = TelnetOptionEntry("MCCP2", .will)
     table[87]  = TelnetOptionEntry("MCCP3", .will)
-    table[90]  = TelnetOptionEntry("MSP")
+    table[90]  = TelnetOptionEntry("MSP", .will)
     table[91]  = TelnetOptionEntry("MXP")
     table[201] = TelnetOptionEntry("GMCP", .will)
 
