@@ -169,6 +169,16 @@ public final class TelnetSession {
         write(packet)
     }
 
+    /// Send an MSP trigger as a telnet subnegotiation (IAC SB MSP ... IAC SE).
+    /// The payload should be a complete MSP trigger, e.g. "!!SOUND(file.wav V=50)".
+    public func sendMSP(_ payload: String) {
+        var packet: [UInt8] = [TC.IAC, TC.SB, TO.MSP]
+        packet.append(contentsOf: payload.utf8)
+        packet.append(TC.IAC)
+        packet.append(TC.SE)
+        write(packet)
+    }
+
     // MARK: - Input Processing
 
     /// Process raw input from the client. Strips telnet negotiations,
