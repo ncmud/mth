@@ -1,3 +1,5 @@
 *.o
 .swiftpm
+kotlin/.gradle/
+kotlin/**/build/
 

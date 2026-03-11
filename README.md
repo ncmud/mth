@@ -1,8 +1,8 @@
-[![C CI](https://github.com/ncmud/mth/actions/workflows/c.yml/badge.svg)](https://github.com/ncmud/mth/actions/workflows/c.yml) [![Swift](https://github.com/ncmud/mth/actions/workflows/swift.yml/badge.svg)](https://github.com/ncmud/mth/actions/workflows/swift.yml)
+[![C CI](https://github.com/ncmud/mth/actions/workflows/c.yml/badge.svg)](https://github.com/ncmud/mth/actions/workflows/c.yml) [![Swift](https://github.com/ncmud/mth/actions/workflows/swift.yml/badge.svg)](https://github.com/ncmud/mth/actions/workflows/swift.yml) [![Kotlin](https://github.com/ncmud/mth/actions/workflows/kotlin.yml/badge.svg)](https://github.com/ncmud/mth/actions/workflows/kotlin.yml)
 
 # MTH (Mud Telopt Handler)
 
-A Swift library for handling telnet option negotiation in MUD servers. Supports the following telnet options:
+A library for handling telnet option negotiation in MUD servers and clients. Available in C, Swift, and Kotlin. Supports the following telnet options:
 
 ```
 CHARSET      - Reports the character sets supported by the client.
@@ -19,9 +19,9 @@ NEW_ENVIRON  - Reports various system variables.
 TTYPE        - Reports the client's terminal type.
 ```
 
-Also includes `MTHColor`, a color code substitution library supporting ANSI-16, xterm-256, and true color output.
+Also includes color code substitution supporting ANSI-16, xterm-256, and true color output.
 
-## Usage
+## Swift Usage
 
 Add the dependency to your `Package.swift`:
 
@@ -41,7 +41,7 @@ Then add the libraries you need:
 ),
 ```
 
-### TelnetSession
+### Server-Side TelnetSession
 
 ```swift
 import MTH
@@ -84,9 +84,101 @@ import MTHColor
 let output = substituteColor("^RBold Red ^ggreen^x", depth: .trueColor)
 ```
 
+## Kotlin Usage
+
+The Kotlin package provides both server-side and client-side telnet handling. Add the dependency via a Gradle composite build or git submodule:
+
+```kotlin
+// settings.gradle.kts
+includeBuild("path/to/mth/kotlin") {
+    dependencySubstitution {
+        substitute(module("mth:mth-core")).using(project(":mth-core"))
+        substitute(module("mth:mth-color")).using(project(":mth-color"))
+    }
+}
+```
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation("mth:mth-core")  // telnet protocol handling
+    implementation("mth:mth-color") // color substitution
+}
+```
+
+### Client-Side (for MUD clients like Android apps)
+
+The client session handles the inverse of server-side negotiation: it receives WILL/DO from the server and responds appropriately.
+
+```kotlin
+import mth.core.client.TelnetClientDelegate
+import mth.core.client.TelnetClientSession
+
+class MyConnection : TelnetClientDelegate {
+    val session = TelnetClientSession(
+        delegate = this,
+        terminalType = "MyMudClient",
+        windowWidth = 80,
+        windowHeight = 24
+    )
+
+    override fun write(data: ByteArray) {
+        socket.write(data)  // send to server
+    }
+
+    override fun onLocalEchoChanged(enabled: Boolean) {
+        // toggle local echo (e.g. hide password input)
+    }
+
+    override fun onGMCPReceived(module: String, json: String) {
+        // handle GMCP data from server (e.g. "Char.Vitals" with HP/mana JSON)
+    }
+
+    override fun onMSDPVariable(name: String, value: String) {
+        // handle MSDP variable updates from server
+    }
+
+    override fun onPromptReceived() {
+        // server sent EOR/GA — mark prompt boundary
+    }
+
+    fun onDataReceived(raw: ByteArray) {
+        val displayText = session.processInput(raw)
+        // displayText is clean text with all telnet sequences stripped
+        terminal.append(displayText)
+    }
+
+    fun onWindowResized(cols: Int, rows: Int) {
+        session.sendWindowSize(cols, rows)
+    }
+}
+```
+
+### Server-Side (for MUD servers)
+
+```kotlin
+import mth.core.server.TelnetSession
+import mth.core.server.TelnetSessionDelegate
+
+class MyServerConnection : TelnetSessionDelegate {
+    val session = TelnetSession(delegate = this)
+
+    init { session.announceSupport() }
+
+    override fun telnetSessionWrite(session: TelnetSession, data: ByteArray) {
+        socket.write(data)
+    }
+
+    fun onDataReceived(raw: ByteArray) {
+        val clean = session.processInput(raw)
+    }
+}
+```
+
 ## Platforms
 
-macOS, Linux, and Windows. MCCP2/MCCP3 compression requires system zlib (present in macOS SDK and as a Swift toolchain dependency on Linux). On Windows, the library builds and runs without compression support — MCCP is compiled out and all other telnet options work normally.
+- **Swift:** macOS, Linux, Windows. MCCP2/3 requires system zlib (present in macOS SDK and as a Swift toolchain dependency on Linux). On Windows, compression is compiled out; all other options work normally.
+- **Kotlin/JVM:** Any platform with JDK 17+. MCCP2 uses `java.util.zip`.
 
 ## License
 
