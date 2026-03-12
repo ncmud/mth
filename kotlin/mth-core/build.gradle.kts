@@ -3,14 +3,10 @@ plugins {
     `maven-publish`
 }
 
-group = "com.github.ncmud.mth"
-version = project.findProperty("VERSION") ?: "unspecified"
-
 publishing {
     publications {
         create<MavenPublication>("maven") {
             from(components["java"])
-            artifactId = "mth-core"
         }
     }
 }
