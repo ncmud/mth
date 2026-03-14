@@ -3,6 +3,7 @@ import PackageDescription
 
 var products: [Product] = [
     .library(name: "MTH", targets: ["MTH"]),
+    .library(name: "MTHClient", targets: ["MTHClient"]),
     .library(name: "MTHColor", targets: ["MTHColor"]),
 ]
 
@@ -15,13 +16,25 @@ var targets: [Target] = [
         publicHeadersPath: "include",
         linkerSettings: [.linkedLibrary("z")]
     ),
-    // New Swift targets
+    // Shared telnet constants, compression, and MTTS flags used by both server and client.
+    .target(
+        name: "MTHCore",
+        dependencies: [
+            .target(name: "CZlib", condition: .when(platforms: [.macOS, .linux, .iOS, .visionOS])),
+        ],
+        path: "Sources/SwiftMTHCore"
+    ),
+    // Server-side telnet session, MSDP, MSSP, and related protocols.
     .target(
         name: "MTH",
-        dependencies: [
-            .target(name: "CZlib", condition: .when(platforms: [.macOS, .linux])),
-        ],
+        dependencies: ["MTHCore"],
         path: "Sources/SwiftMTH"
+    ),
+    // Client-side telnet session for MUD clients.
+    .target(
+        name: "MTHClient",
+        dependencies: ["MTHCore"],
+        path: "Sources/SwiftMTHClient"
     ),
     .target(
         name: "MTHColor",
@@ -55,7 +68,7 @@ targets += [
     ),
     .testTarget(
         name: "MTHTests",
-        dependencies: ["MTH", "Cmth"]
+        dependencies: ["MTH", "MTHClient", "Cmth"]
     ),
     .testTarget(
         name: "MTHColorTests",
@@ -66,7 +79,7 @@ targets += [
 targets += [
     .testTarget(
         name: "MTHTests",
-        dependencies: ["MTH"]
+        dependencies: ["MTH", "MTHClient"]
     ),
     .testTarget(
         name: "MTHColorTests",
