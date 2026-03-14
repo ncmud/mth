@@ -19,6 +19,9 @@ interface TelnetClientDelegate {
     /** Server sent EOR or GA prompt marker. */
     fun onPromptReceived()
 
+    /** MSSP data received from server. */
+    fun onMSSPReceived(data: Map<String, String>) {}
+
     /** Server sent BEL (0x07) character. */
     fun onBellReceived() {}
 

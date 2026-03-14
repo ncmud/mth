@@ -16,6 +16,9 @@ public protocol TelnetClientDelegate: AnyObject {
     /// Called when an MSDP variable is received from the server.
     func onMSDPVariable(name: String, value: String)
 
+    /// Called when MSSP data is received from the server.
+    func onMSSPReceived(data: [String: String])
+
     /// Called when a prompt marker (GA or EOR) is received.
     func onPromptReceived()
 
@@ -28,6 +31,7 @@ public protocol TelnetClientDelegate: AnyObject {
 
 public extension TelnetClientDelegate {
     func onGMCPNegotiated() {}
+    func onMSSPReceived(data: [String: String]) {}
     func onBellReceived() {}
     func log(message: String) {}
 }

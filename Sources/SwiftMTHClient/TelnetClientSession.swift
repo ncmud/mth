@@ -23,6 +23,7 @@ public final class TelnetClientSession {
     public private(set) var serverEcho: Bool = false
     public private(set) var gmcpEnabled: Bool = false
     public private(set) var msdpEnabled: Bool = false
+    public private(set) var msspEnabled: Bool = false
 
     // MARK: - Private State
 
@@ -192,6 +193,12 @@ public final class TelnetClientSession {
                           handler: { s, _, _, _ in s.processWillMsdp(); return 3 }),
             TeloptPattern(pattern: [TC.IAC, TC.SB, TO.MSDP],
                           handler: { s, src, i, n in s.processSbMsdp(src, at: i, srclen: n) }),
+
+            // MSSP
+            TeloptPattern(pattern: [TC.IAC, TC.WILL, TO.MSSP],
+                          handler: { s, _, _, _ in s.processWillMssp(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.SB, TO.MSSP],
+                          handler: { s, src, i, n in s.processSbMssp(src, at: i, srclen: n) }),
 
             // Echo
             TeloptPattern(pattern: [TC.IAC, TC.WILL, TO.ECHO],
@@ -392,6 +399,57 @@ public final class TelnetClientSession {
                 j += 1
             }
         }
+        return sbLen
+    }
+
+    // MARK: - Handler: MSSP
+
+    private func processWillMssp() {
+        msspEnabled = true
+        serverOptions.insert(TO.MSSP)
+        write([TC.IAC, TC.DO, TO.MSSP])
+    }
+
+    private func processSbMssp(_ src: [UInt8], at offset: Int, srclen: Int) -> Int {
+        let sbLen = skipSB(src, at: offset, srclen: srclen)
+        if sbLen > srclen { return srclen + 1 }
+
+        var data: [String: String] = [:]
+        var varName = ""
+        var j = offset + 3
+        let end = offset + srclen
+
+        while j < end && src[j] != TC.SE {
+            switch src[j] {
+            case 1: // MSSP_VAR
+                j += 1
+                var buf: [UInt8] = []
+                while j < end && src[j] != 1 && src[j] != 2 && src[j] != TC.IAC {
+                    buf.append(src[j])
+                    j += 1
+                }
+                varName = String(decoding: buf, as: UTF8.self)
+
+            case 2: // MSSP_VAL
+                j += 1
+                var buf: [UInt8] = []
+                while j < end && src[j] != 1 && src[j] != 2 && src[j] != TC.IAC {
+                    buf.append(src[j])
+                    j += 1
+                }
+                if !varName.isEmpty {
+                    data[varName] = String(decoding: buf, as: UTF8.self)
+                }
+
+            default:
+                j += 1
+            }
+        }
+
+        if !data.isEmpty {
+            delegate?.onMSSPReceived(data: data)
+        }
+
         return sbLen
     }
 

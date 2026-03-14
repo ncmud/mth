@@ -11,6 +11,7 @@ final class FakeClientDelegate: TelnetClientDelegate {
     var logMessages: [String] = []
     var gmcpMessages: [(module: String, json: String)] = []
     var msdpVariables: [(name: String, value: String)] = []
+    var msspData: [[String: String]] = []
     var localEchoEnabled: Bool? = nil
     var promptCount = 0
     var bellCount = 0
@@ -25,6 +26,7 @@ final class FakeClientDelegate: TelnetClientDelegate {
     func onGMCPNegotiated() { gmcpNegotiatedCount += 1 }
     func onGMCPReceived(module: String, json: String) { gmcpMessages.append((module, json)) }
     func onMSDPVariable(name: String, value: String) { msdpVariables.append((name, value)) }
+    func onMSSPReceived(data: [String: String]) { msspData.append(data) }
     func onPromptReceived() { promptCount += 1 }
     func onBellReceived() { bellCount += 1 }
     func log(message: String) { logMessages.append(message) }
@@ -359,5 +361,43 @@ struct TelnetClientSessionTests {
         _ = s.processInput([TC.IAC, TC.WILL, TO.GMCP])
         _ = s.processInput([TC.IAC, TC.WILL, TO.GMCP])
         #expect(d.gmcpNegotiatedCount == 2)
+    }
+
+    @Test func serverWillMsspRespondsDo() {
+        let (s, d) = makeSession()
+        _ = s.processInput([TC.IAC, TC.WILL, TO.MSSP])
+        #expect(s.msspEnabled)
+        #expect(d.allWrittenBytes == [TC.IAC, TC.DO, TO.MSSP])
+    }
+
+    @Test func serverSendsMsspData() {
+        let (s, d) = makeSession()
+        _ = s.processInput([TC.IAC, TC.WILL, TO.MSSP])
+        d.writtenChunks.removeAll()
+        let MV: UInt8 = 1; let ML: UInt8 = 2
+        let packet: [UInt8] = [TC.IAC, TC.SB, TO.MSSP, MV] + Array("NAME".utf8) +
+            [ML] + Array("TestMUD".utf8) +
+            [MV] + Array("PLAYERS".utf8) +
+            [ML] + Array("42".utf8) +
+            [TC.IAC, TC.SE]
+        _ = s.processInput(packet)
+        #expect(d.msspData.count == 1)
+        #expect(d.msspData[0]["NAME"] == "TestMUD")
+        #expect(d.msspData[0]["PLAYERS"] == "42")
+    }
+
+    @Test func msspWithMultipleValues() {
+        let (s, d) = makeSession()
+        _ = s.processInput([TC.IAC, TC.WILL, TO.MSSP])
+        d.writtenChunks.removeAll()
+        let MV: UInt8 = 1; let ML: UInt8 = 2
+        // MSSP_VAR "GENRE" MSSP_VAL "Fantasy" MSSP_VAL "Adventure" — last value wins
+        let packet: [UInt8] = [TC.IAC, TC.SB, TO.MSSP, MV] + Array("GENRE".utf8) +
+            [ML] + Array("Fantasy".utf8) +
+            [ML] + Array("Adventure".utf8) +
+            [TC.IAC, TC.SE]
+        _ = s.processInput(packet)
+        #expect(d.msspData.count == 1)
+        #expect(d.msspData[0]["GENRE"] == "Adventure")
     }
 }
