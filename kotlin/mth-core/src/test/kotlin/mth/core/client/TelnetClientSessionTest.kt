@@ -24,6 +24,7 @@ private const val TTYPE: Byte = 24
 private const val EOR_OPT: Byte = 25
 private const val NAWS: Byte = 31
 private const val MSDP: Byte = 69
+private const val MSSP: Byte = 70
 private const val MCCP2: Byte = 86
 private const val GMCP: Byte = 0xC9.toByte()
 
@@ -47,6 +48,7 @@ private class FakeClientDelegate : TelnetClientDelegate {
     val logMessages = mutableListOf<String>()
     val gmcpMessages = mutableListOf<Pair<String, String>>()
     val msdpVariables = mutableListOf<Pair<String, String>>()
+    val msspData = mutableListOf<Map<String, String>>()
     var localEchoEnabled: Boolean? = null
     var promptCount = 0
     var bellCount = 0
@@ -69,6 +71,7 @@ private class FakeClientDelegate : TelnetClientDelegate {
     override fun onMSDPVariable(name: String, value: String) {
         msdpVariables.add(Pair(name, value))
     }
+    override fun onMSSPReceived(data: Map<String, String>) { msspData.add(data) }
     override fun onPromptReceived() {
         promptCount++
     }
@@ -473,5 +476,51 @@ class TelnetClientSessionTest {
         // Second WILL GMCP still fires — the library doesn't deduplicate,
         // but in practice servers only send it once
         assertEquals(2, d.gmcpNegotiatedCount)
+    }
+
+    // -- MSSP --
+
+    @Test fun serverWillMsspRespondsDo() {
+        val (s, d) = makeSession()
+        s.processInput(byteArrayOf(IAC, WILL, MSSP))
+        assertTrue(s.msspEnabled)
+        assertContentEquals(byteArrayOf(IAC, DO, MSSP), d.allWrittenBytes)
+    }
+
+    @Test fun serverSendsMsspData() {
+        val (s, d) = makeSession()
+        s.processInput(byteArrayOf(IAC, WILL, MSSP))
+        d.writtenChunks.clear()
+
+        val MV: Byte = 1
+        val ML: Byte = 2
+        val packet = byteArrayOf(IAC, SB, MSSP, MV) + textBytes("NAME") +
+            byteArrayOf(ML) + textBytes("TestMUD") +
+            byteArrayOf(MV) + textBytes("PLAYERS") +
+            byteArrayOf(ML) + textBytes("42") +
+            byteArrayOf(IAC, SE)
+        s.processInput(packet)
+
+        assertEquals(1, d.msspData.size)
+        assertEquals("TestMUD", d.msspData[0]["NAME"])
+        assertEquals("42", d.msspData[0]["PLAYERS"])
+    }
+
+    @Test fun msspWithMultipleValues() {
+        val (s, d) = makeSession()
+        s.processInput(byteArrayOf(IAC, WILL, MSSP))
+        d.writtenChunks.clear()
+
+        val MV: Byte = 1
+        val ML: Byte = 2
+        // MSSP_VAR "GENRE" MSSP_VAL "Fantasy" MSSP_VAL "Adventure" — last value wins
+        val packet = byteArrayOf(IAC, SB, MSSP, MV) + textBytes("GENRE") +
+            byteArrayOf(ML) + textBytes("Fantasy") +
+            byteArrayOf(ML) + textBytes("Adventure") +
+            byteArrayOf(IAC, SE)
+        s.processInput(packet)
+
+        assertEquals(1, d.msspData.size)
+        assertEquals("Adventure", d.msspData[0]["GENRE"])
     }
 }

@@ -35,6 +35,10 @@ class TelnetClientSession(
     var msdpEnabled: Boolean = false
         private set
 
+    /** Whether MSSP has been negotiated. */
+    var msspEnabled: Boolean = false
+        private set
+
     // -- Private State --
 
     /** Buffer for incomplete telnet sequences (packet fragmentation). */
@@ -238,6 +242,12 @@ class TelnetClientSession(
             TeloptPattern(byteArrayOf(TC.IAC, TC.SB, TO.MSDP))
                 { s, src, i, n -> s.processSbMsdp(src, i, n) },
 
+            // Server offers MSSP
+            TeloptPattern(byteArrayOf(TC.IAC, TC.WILL, TO.MSSP))
+                { s, _, _, _ -> s.processWillMssp(); 3 },
+            TeloptPattern(byteArrayOf(TC.IAC, TC.SB, TO.MSSP))
+                { s, src, i, n -> s.processSbMssp(src, i, n) },
+
             // Server offers ECHO
             TeloptPattern(byteArrayOf(TC.IAC, TC.WILL, TO.ECHO))
                 { s, _, _, _ -> s.processWillEcho(); 3 },
@@ -420,6 +430,56 @@ class TelnetClientSession(
                 }
                 else -> j++
             }
+        }
+
+        return sbLen
+    }
+
+    // -- Handler: MSSP --
+
+    private fun processWillMssp() {
+        msspEnabled = true
+        serverOptions.add(TO.MSSP)
+        write(byteArrayOf(TC.IAC, TC.DO, TO.MSSP))
+    }
+
+    private fun processSbMssp(src: ByteArray, offset: Int, srclen: Int): Int {
+        val sbLen = skipSB(src, offset, srclen)
+        if (sbLen > srclen) return srclen + 1
+
+        val data = mutableMapOf<String, String>()
+        var varName = ""
+        var j = offset + 3
+        val end = offset + srclen
+
+        while (j < end && src[j] != TC.SE) {
+            when (src[j]) {
+                1.toByte() -> { // MSSP_VAR
+                    j++
+                    val buf = mutableListOf<Byte>()
+                    while (j < end && src[j] != 1.toByte() && src[j] != 2.toByte() && src[j] != TC.IAC) {
+                        buf.add(src[j])
+                        j++
+                    }
+                    varName = String(buf.toByteArray(), Charsets.UTF_8)
+                }
+                2.toByte() -> { // MSSP_VAL
+                    j++
+                    val buf = mutableListOf<Byte>()
+                    while (j < end && src[j] != 1.toByte() && src[j] != 2.toByte() && src[j] != TC.IAC) {
+                        buf.add(src[j])
+                        j++
+                    }
+                    if (varName.isNotEmpty()) {
+                        data[varName] = String(buf.toByteArray(), Charsets.UTF_8)
+                    }
+                }
+                else -> j++
+            }
+        }
+
+        if (data.isNotEmpty()) {
+            delegate?.onMSSPReceived(data)
         }
 
         return sbLen
