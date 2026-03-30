@@ -20,7 +20,7 @@ var targets: [Target] = [
     .target(
         name: "MTHCore",
         dependencies: [
-            .target(name: "CZlib", condition: .when(platforms: [.macOS, .linux, .iOS, .visionOS])),
+            "CZlib",
         ],
         path: "Sources/SwiftMTHCore"
     ),

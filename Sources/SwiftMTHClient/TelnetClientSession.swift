@@ -344,7 +344,7 @@ public final class TelnetClientSession {
 
     private func processSbMccp2() {
         guard let stream = InflateStream() else {
-            log("MCCP2: Failed to initialize inflate stream.")
+            log("MCCP2: Failed to initialize inflate stream. InflateStream() returned nil.")
             return
         }
         mccp2 = stream
