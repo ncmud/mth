@@ -35,6 +35,7 @@ object TelnetOption {
     const val CHARSET: Byte = 42
     const val MSDP: Byte = 69
     const val MSSP: Byte = 70
+    const val MCCP1: Byte = 85.toByte()
     const val MCCP2: Byte = 86.toByte()
     const val MCCP3: Byte = 87.toByte()
     const val MSP: Byte = 90.toByte()

@@ -272,6 +272,11 @@ class TelnetClientSession(
             TeloptPattern(byteArrayOf(TC.IAC, TC.DO, TO.NAWS))
                 { s, _, _, _ -> s.processDoNaws(); 3 },
 
+            // MCCP1 (option 85) uses a non-standard SB terminator: IAC SB 85 WILL SE
+            // where SE appears without a preceding IAC. Skip the 5-byte start sequence.
+            TeloptPattern(byteArrayOf(TC.IAC, TC.SB, TO.MCCP1, TC.WILL, TC.SE))
+                { _, _, _, _ -> 5 },
+
             // EOR command (prompt marker)
             TeloptPattern(byteArrayOf(TC.IAC, TC.EOR))
                 { s, _, _, _ -> s.processEorCommand(); 2 },
