@@ -40,6 +40,7 @@ public enum TelnetOption {
     public static let CHARSET: UInt8      = 42
     public static let MSDP: UInt8         = 69
     public static let MSSP: UInt8         = 70
+    public static let MCCP1: UInt8        = 85
     public static let MCCP2: UInt8        = 86
     public static let MCCP3: UInt8        = 87
     public static let MSP: UInt8          = 90
@@ -104,6 +105,7 @@ public let defaultTelnetTable: [TelnetOptionEntry] = {
     table[42]  = TelnetOptionEntry("CHARSET", .will)
     table[69]  = TelnetOptionEntry("MSDP", .will)
     table[70]  = TelnetOptionEntry("MSSP", .will)
+    table[85]  = TelnetOptionEntry("MCCP1")
     table[86]  = TelnetOptionEntry("MCCP2", .will)
     table[87]  = TelnetOptionEntry("MCCP3", .will)
     table[90]  = TelnetOptionEntry("MSP", .will)

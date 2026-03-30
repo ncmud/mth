@@ -224,6 +224,11 @@ public final class TelnetClientSession {
             TeloptPattern(pattern: [TC.IAC, TC.DO, TO.NAWS],
                           handler: { s, _, _, _ in s.processDoNaws(); return 3 }),
 
+            // MCCP1 (option 85) uses a non-standard SB terminator: IAC SB 85 WILL SE
+            // where SE appears without a preceding IAC. Skip the 5-byte start sequence.
+            TeloptPattern(pattern: [TC.IAC, TC.SB, TO.MCCP1, TC.WILL, TC.SE],
+                          handler: { _, _, _, _ in return 5 }),
+
             // Prompt markers
             TeloptPattern(pattern: [TC.IAC, TC.EOR],
                           handler: { s, _, _, _ in s.delegate?.onPromptReceived(); return 2 }),
