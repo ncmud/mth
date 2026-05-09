@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import MTH
 
@@ -44,6 +45,7 @@ private final class FakeDelegate: TelnetSessionDelegate {
     var writtenChunks: [[UInt8]] = []
     var logMessages: [String] = []
     var msspPairs: [(key: String, value: String)] = []
+    var gmcpPackets: [GMCPPacket] = []
 
     var allWrittenBytes: [UInt8] { writtenChunks.flatMap { $0 } }
 
@@ -57,6 +59,10 @@ private final class FakeDelegate: TelnetSessionDelegate {
 
     func telnetSessionMSSPData(_ session: TelnetSession) -> [(key: String, value: String)] {
         msspPairs
+    }
+
+    func telnetSession(_ session: TelnetSession, gmcpReceived packet: GMCPPacket) {
+        gmcpPackets.append(packet)
     }
 }
 
@@ -547,6 +553,112 @@ private func makeSession() -> (TelnetSession, FakeDelegate) {
     _ = s.processInput(packet)
 
     // Should produce GMCP JSON response (since gmcp mode is on)
+    #expect(!d.writtenChunks.isEmpty)
+}
+
+@Test func sbGmcpDeliversModuleAndPayloadToDelegate() throws {
+    struct Credentials: Decodable, Equatable {
+        let account: String
+        let token: String
+    }
+
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, GMCP])
+
+    let body = Array("Char.Login.Credentials {\"account\":\"Jake\",\"token\":\"abc\"}".utf8)
+    let packet: [UInt8] = [IAC, SB, GMCP] + body + [IAC, SE]
+    _ = s.processInput(packet)
+
+    #expect(d.gmcpPackets.count == 1)
+    let received = try #require(d.gmcpPackets.first)
+    #expect(received.module == "Char.Login.Credentials")
+    #expect(try received.decode(Credentials.self)
+        == Credentials(account: "Jake", token: "abc"))
+}
+
+@Test func sbGmcpModuleOnlyPacketDecodesAsNil() throws {
+    struct AnyShape: Decodable {}
+
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, GMCP])
+
+    let body = Array("Core.Ping".utf8)
+    let packet: [UInt8] = [IAC, SB, GMCP] + body + [IAC, SE]
+    _ = s.processInput(packet)
+
+    let received = try #require(d.gmcpPackets.first)
+    #expect(received.module == "Core.Ping")
+    #expect(try received.decode(AnyShape.self) == nil)
+}
+
+@Test func sbGmcpEmptyBodyDoesNotCallDelegate() {
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, GMCP])
+
+    // Malformed but technically valid SB framing: zero-byte body.
+    let packet: [UInt8] = [IAC, SB, GMCP, IAC, SE]
+    _ = s.processInput(packet)
+
+    #expect(d.gmcpPackets.isEmpty)
+}
+
+@Test func sbGmcpLeadingSpaceProducesEmptyModuleAndIsSkipped() {
+    // A body that starts with a space would parse as module="" + payload=...,
+    // which contradicts the "module always non-empty" contract. Skip it.
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, GMCP])
+
+    let body = Array(" {\"x\":1}".utf8)
+    let packet: [UInt8] = [IAC, SB, GMCP] + body + [IAC, SE]
+    _ = s.processInput(packet)
+
+    #expect(d.gmcpPackets.isEmpty)
+}
+
+@Test func sbGmcpDecodeThrowsOnMalformedJson() {
+    struct Anything: Decodable { let x: Int }
+
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, GMCP])
+
+    let body = Array("Some.Module not-valid-json".utf8)
+    let packet: [UInt8] = [IAC, SB, GMCP] + body + [IAC, SE]
+    _ = s.processInput(packet)
+
+    let received = d.gmcpPackets.first!
+    #expect(throws: DecodingError.self) {
+        try received.decode(Anything.self)
+    }
+}
+
+@Test func sbGmcpByteCountReportsPayloadSize() {
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, GMCP])
+
+    let json = "{\"x\":1}"
+    let body = Array("Some.Module \(json)".utf8)
+    let packet: [UInt8] = [IAC, SB, GMCP] + body + [IAC, SE]
+    _ = s.processInput(packet)
+
+    #expect(d.gmcpPackets.first?.byteCount == json.utf8.count)
+}
+
+@Test func sbGmcpStillRunsMsdpFallbackForFlatVarPackages() {
+    // The original `sbGmcpProcessesJsonCommand` exercises the flat-var path:
+    // an `MSDP {"LIST":"COMMANDS"}` packet should still produce a GMCP-JSON
+    // response from the MSDPManager. With the delegate hook added, that
+    // response must continue to fire.
+    let (s, d) = makeSession()
+    _ = s.processInput([IAC, DO, GMCP])
+    d.writtenChunks.removeAll()
+    d.gmcpPackets.removeAll()
+
+    let body = Array("MSDP {\"LIST\":\"COMMANDS\"}".utf8)
+    let packet: [UInt8] = [IAC, SB, GMCP] + body + [IAC, SE]
+    _ = s.processInput(packet)
+
+    #expect(d.gmcpPackets.count == 1)
+    #expect(d.gmcpPackets.first?.module == "MSDP")
     #expect(!d.writtenChunks.isEmpty)
 }
 

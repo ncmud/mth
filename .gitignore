@@ -3,3 +3,4 @@
 kotlin/.gradle/
 kotlin/**/build/
 
+.build/
