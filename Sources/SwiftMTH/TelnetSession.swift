@@ -738,6 +738,26 @@ public final class TelnetSession {
         let sbLen = skipSB(src, at: offset, srclen: srclen)
         if sbLen > srclen { return srclen + 1 }
 
+        // Surface raw module + JSON payload to the delegate before the MSDP
+        // fallback runs. SB framing: [IAC, SB, GMCP, <body>, IAC, SE].
+        if let delegate = delegate, sbLen >= 5 {
+            let bodyStart = offset + 3
+            let bodyEnd = offset + sbLen - 2
+            if bodyEnd > bodyStart {
+                var splitIdx = bodyStart
+                while splitIdx < bodyEnd && src[splitIdx] != UInt8(ascii: " ") {
+                    splitIdx += 1
+                }
+                let module = String(decoding: src[bodyStart..<splitIdx], as: UTF8.self)
+                if !module.isEmpty {
+                    let jsonStart = splitIdx < bodyEnd ? splitIdx + 1 : bodyEnd
+                    let payload = Data(src[jsonStart..<bodyEnd])
+                    delegate.telnetSession(
+                        self, gmcpReceived: GMCPPacket(module: module, payload: payload))
+                }
+            }
+        }
+
         // Convert JSON to MSDP and process
         let gmcpPacket = Array(src[offset..<offset + srclen])
         let msdpPacket = json2msdp(gmcpPacket)
