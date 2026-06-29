@@ -132,6 +132,16 @@ public final class TelnetSession {
         write([TC.IAC, TC.WILL, TO.GMCP])
     }
 
+    /// Whether the client negotiated MXP (telnet option 91).
+    public var mxpEnabled: Bool { commFlags.contains(.mxp) }
+
+    /// Re-assert the locked-default MXP line mode after a copyover restore, for a
+    /// client that had MXP enabled. See `processDoMxp`.
+    public func reassertMXP() {
+        guard commFlags.contains(.mxp) else { return }
+        write(TelnetSession.mxpLockedDefault)
+    }
+
     /// Send echo-off (password mode).
     public func sendEchoOff() {
         commFlags.insert(.password)
@@ -332,6 +342,11 @@ public final class TelnetSession {
                           handler: { s, src, i, n in s.processDoGmcp(); return 3 }),
             TeloptPattern(pattern: [TC.IAC, TC.SB, TO.GMCP],
                           handler: { s, src, i, n in s.processSbGmcp(src, at: i, srclen: n) }),
+
+            TeloptPattern(pattern: [TC.IAC, TC.DO, TO.MXP],
+                          handler: { s, src, i, n in s.processDoMxp(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.DONT, TO.MXP],
+                          handler: { s, src, i, n in s.processDontMxp(); return 3 }),
         ]
         #if canImport(CZlib)
         patterns += [
@@ -719,6 +734,24 @@ public final class TelnetSession {
         }
 
         return sbLen
+    }
+
+    // MARK: - Handler: MXP
+
+    /// `ESC[7z` — Lock Locked: makes "locked" the persistent default line mode across
+    /// newlines, so normal output (with stray `< > &`) is never parsed as MXP markup.
+    /// Links opt back in per-span with `ESC[1z … ESC[2z`. (Zugg MXP line-mode spec.)
+    private static let mxpLockedDefault: [UInt8] = [0x1B, 0x5B, 0x37, 0x7A]
+
+    private func processDoMxp() {
+        guard !commFlags.contains(.mxp) else { return }
+        commFlags.insert(.mxp)
+        write(TelnetSession.mxpLockedDefault)
+        log("INFO MXP ENABLED")
+    }
+
+    private func processDontMxp() {
+        commFlags.remove(.mxp)
     }
 
     // MARK: - Handler: GMCP
