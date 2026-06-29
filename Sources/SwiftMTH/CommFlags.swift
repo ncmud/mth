@@ -16,4 +16,5 @@ public struct CommFlags: OptionSet, Sendable {
     public static let colors256   = CommFlags(rawValue: 1 << 5)
     public static let utf8        = CommFlags(rawValue: 1 << 6)
     public static let gmcp        = CommFlags(rawValue: 1 << 7)
+    public static let mxp         = CommFlags(rawValue: 1 << 8)
 }
