@@ -57,6 +57,14 @@ struct TelnetClientSessionTests {
         #expect(out == input)
     }
 
+    @Test func mxpWillIsAcceptedWithDo() {
+        let (s, d) = makeSession()
+        #expect(!s.mxpEnabled)
+        _ = s.processInput([TC.IAC, TC.WILL, TO.MXP])
+        #expect(s.mxpEnabled)
+        #expect(d.allWrittenBytes.containsSequence([TC.IAC, TC.DO, TO.MXP]))
+    }
+
     @Test func emptyInput() {
         let (s, _) = makeSession()
         let out = s.processInput([])

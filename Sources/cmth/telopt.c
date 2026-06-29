@@ -21,6 +21,8 @@ int         process_do_msdp          ( DESCRIPTOR_DATA *d, unsigned char *src, i
 int         process_sb_msdp          ( DESCRIPTOR_DATA *d, unsigned char *src, int srclen );
 int         process_do_gmcp          ( DESCRIPTOR_DATA *d, unsigned char *src, int srclen );
 int         process_sb_gmcp          ( DESCRIPTOR_DATA *d, unsigned char *src, int srclen );
+int         process_do_mxp           ( DESCRIPTOR_DATA *d, unsigned char *src, int srclen );
+int         process_dont_mxp         ( DESCRIPTOR_DATA *d, unsigned char *src, int srclen );
 int         process_do_mccp2         ( DESCRIPTOR_DATA *d, unsigned char *src, int srclen );
 int         process_dont_mccp2       ( DESCRIPTOR_DATA *d, unsigned char *src, int srclen );
 int         skip_sb                  ( DESCRIPTOR_DATA *d, unsigned char *src, int srclen );
@@ -66,6 +68,9 @@ const struct telopt_type telopt_table [] =
 
 	{ 3, (unsigned char []) { IAC, DO,   TELOPT_GMCP, 0 },                      &process_do_gmcp},
 	{ 3, (unsigned char []) { IAC, SB,   TELOPT_GMCP, 0 },                      &process_sb_gmcp},
+
+	{ 3, (unsigned char []) { IAC, DO,   TELOPT_MXP, 0 },                       &process_do_mxp},
+	{ 3, (unsigned char []) { IAC, DONT, TELOPT_MXP, 0 },                       &process_dont_mxp},
 
 	{ 3, (unsigned char []) { IAC, DO,   TELOPT_MCCP2, 0 },                     &process_do_mccp2},
 	{ 3, (unsigned char []) { IAC, DONT, TELOPT_MCCP2, 0 },                     &process_dont_mccp2},
@@ -861,6 +866,32 @@ int process_sb_msdp( DESCRIPTOR_DATA *d, unsigned char *src, int srclen )
 		}
 	}
 	return i + 1;
+}
+
+// MXP
+
+int process_do_mxp( DESCRIPTOR_DATA *d, unsigned char *src, int srclen )
+{
+	if (HAS_BIT(d->mth->comm_flags, COMM_FLAG_MXP))
+	{
+		return 3;
+	}
+
+	SET_BIT(d->mth->comm_flags, COMM_FLAG_MXP);
+
+	/* ESC[7z — Lock Locked: make "locked" the persistent default line mode, so
+	   normal output is never parsed as MXP markup. Links opt back in per-span. */
+	descriptor_printf(d, "\033[7z");
+	log_descriptor_printf(d, "INFO MXP ENABLED");
+
+	return 3;
+}
+
+int process_dont_mxp( DESCRIPTOR_DATA *d, unsigned char *src, int srclen )
+{
+	DEL_BIT(d->mth->comm_flags, COMM_FLAG_MXP);
+
+	return 3;
 }
 
 // MSDP over GMCP

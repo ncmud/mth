@@ -39,6 +39,10 @@ class TelnetClientSession(
     var msspEnabled: Boolean = false
         private set
 
+    /** Whether MXP has been negotiated. */
+    var mxpEnabled: Boolean = false
+        private set
+
     // -- Private State --
 
     /** Buffer for incomplete telnet sequences (packet fragmentation). */
@@ -230,6 +234,10 @@ class TelnetClientSession(
             TeloptPattern(byteArrayOf(TC.IAC, TC.SB, TO.GMCP))
                 { s, src, i, n -> s.processSbGmcp(src, i, n) },
 
+            // Server offers MXP — accept so it may send MXP markup.
+            TeloptPattern(byteArrayOf(TC.IAC, TC.WILL, TO.MXP))
+                { s, _, _, _ -> s.processWillMxp(); 3 },
+
             // Server offers MCCP2
             TeloptPattern(byteArrayOf(TC.IAC, TC.WILL, TO.MCCP2))
                 { s, _, _, _ -> s.processWillMccp2(); 3 },
@@ -344,6 +352,12 @@ class TelnetClientSession(
         serverOptions.add(TO.GMCP)
         write(byteArrayOf(TC.IAC, TC.DO, TO.GMCP))
         delegate?.onGMCPNegotiated()
+    }
+
+    private fun processWillMxp() {
+        mxpEnabled = true
+        serverOptions.add(TO.MXP)
+        write(byteArrayOf(TC.IAC, TC.DO, TO.MXP))
     }
 
     private fun processSbGmcp(src: ByteArray, offset: Int, srclen: Int): Int {

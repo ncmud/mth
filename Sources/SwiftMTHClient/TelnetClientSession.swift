@@ -24,6 +24,7 @@ public final class TelnetClientSession {
     public private(set) var gmcpEnabled: Bool = false
     public private(set) var msdpEnabled: Bool = false
     public private(set) var msspEnabled: Bool = false
+    public private(set) var mxpEnabled: Bool = false
 
     // MARK: - Private State
 
@@ -188,6 +189,10 @@ public final class TelnetClientSession {
             TeloptPattern(pattern: [TC.IAC, TC.SB, TO.GMCP],
                           handler: { s, src, i, n in s.processSbGmcp(src, at: i, srclen: n) }),
 
+            // MXP — accept the server's offer so it may send MXP markup.
+            TeloptPattern(pattern: [TC.IAC, TC.WILL, TO.MXP],
+                          handler: { s, _, _, _ in s.processWillMxp(); return 3 }),
+
             // MSDP
             TeloptPattern(pattern: [TC.IAC, TC.WILL, TO.MSDP],
                           handler: { s, _, _, _ in s.processWillMsdp(); return 3 }),
@@ -312,6 +317,14 @@ public final class TelnetClientSession {
         serverOptions.insert(TO.GMCP)
         write([TC.IAC, TC.DO, TO.GMCP])
         delegate?.onGMCPNegotiated()
+    }
+
+    // MARK: - Handler: MXP
+
+    private func processWillMxp() {
+        mxpEnabled = true
+        serverOptions.insert(TO.MXP)
+        write([TC.IAC, TC.DO, TO.MXP])
     }
 
     private func processSbGmcp(_ src: [UInt8], at offset: Int, srclen: Int) -> Int {

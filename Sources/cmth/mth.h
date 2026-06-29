@@ -62,6 +62,7 @@ typedef struct descriptor_data    DESCRIPTOR_DATA;
 #define COMM_FLAG_256COLORS     BV06
 #define COMM_FLAG_UTF8          BV07
 #define COMM_FLAG_GMCP          BV08
+#define COMM_FLAG_MXP           BV09
 
 #define MSDP_FLAG_COMMAND       BV01
 #define MSDP_FLAG_LIST          BV02

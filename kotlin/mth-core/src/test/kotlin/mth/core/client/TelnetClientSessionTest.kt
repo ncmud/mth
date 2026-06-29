@@ -124,6 +124,14 @@ class TelnetClientSessionTest {
         assertContentEquals(byteArrayOf(IAC, DO, GMCP), d.allWrittenBytes)
     }
 
+    @Test fun serverWillMxpRespondsDoMxp() {
+        val (s, d) = makeSession()
+        assertFalse(s.mxpEnabled)
+        s.processInput(bytes(0xFF, 0xFB, 91))
+        assertTrue(s.mxpEnabled)
+        assertContentEquals(bytes(0xFF, 0xFD, 91), d.allWrittenBytes)
+    }
+
     @Test fun serverSendsGmcpDataParsed() {
         val (s, d) = makeSession()
         s.processInput(byteArrayOf(IAC, WILL, GMCP))

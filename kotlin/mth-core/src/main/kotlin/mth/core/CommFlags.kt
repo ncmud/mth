@@ -16,5 +16,6 @@ value class CommFlags(val rawValue: Int = 0) {
         val COLORS_256 = CommFlags(1 shl 5)
         val UTF8 = CommFlags(1 shl 6)
         val GMCP = CommFlags(1 shl 7)
+        val MXP = CommFlags(1 shl 8)
     }
 }
