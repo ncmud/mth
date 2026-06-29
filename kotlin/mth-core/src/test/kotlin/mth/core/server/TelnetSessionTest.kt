@@ -99,6 +99,30 @@ class TelnetSessionTest {
         assertTrue(out.isEmpty())
     }
 
+    // -- MXP --
+
+    @Test fun announcesWillMxp() {
+        val (s, d) = makeSession()
+        s.announceSupport()
+        assertTrue(d.allWrittenBytes.containsSequence(bytes(0xFF, 0xFB, 91)))
+    }
+
+    @Test fun doMxpEnablesAndLocksDefault() {
+        val (s, d) = makeSession()
+        assertFalse(s.mxpEnabled)
+        s.processInput(bytes(0xFF, 0xFD, 91))
+        assertTrue(s.mxpEnabled)
+        assertTrue(d.allWrittenBytes.containsSequence(bytes(0x1B, 0x5B, 0x37, 0x7A)))
+    }
+
+    @Test fun dontMxpDisables() {
+        val (s, _) = makeSession()
+        s.processInput(bytes(0xFF, 0xFD, 91))
+        assertTrue(s.mxpEnabled)
+        s.processInput(bytes(0xFF, 0xFE, 91))
+        assertFalse(s.mxpEnabled)
+    }
+
     // -- CR/NUL Handling --
 
     @Test fun crNulConvertsToNewline() {

@@ -113,6 +113,14 @@ class TelnetSession(
         write(byteArrayOf(TC.IAC, TC.WILL, TO.GMCP))
     }
 
+    /** Whether the client negotiated MXP (telnet option 91). */
+    val mxpEnabled: Boolean get() = CommFlags.MXP in commFlags
+
+    /** Re-assert the locked-default MXP line mode after a copyover restore. */
+    fun reassertMXP() {
+        if (CommFlags.MXP in commFlags) write(MXP_LOCKED_DEFAULT)
+    }
+
     /** Send echo-off (password mode). */
     fun sendEchoOff() {
         commFlags = commFlags.insert(CommFlags.PASSWORD)
@@ -341,6 +349,11 @@ class TelnetSession(
                 { s, _, _, _ -> s.processDoGmcp(); 3 },
             TeloptPattern(byteArrayOf(TC.IAC, TC.SB, TO.GMCP))
                 { s, src, i, n -> s.processSbGmcp(src, i, n) },
+
+            TeloptPattern(byteArrayOf(TC.IAC, TC.DO, TO.MXP))
+                { s, _, _, _ -> s.processDoMxp(); 3 },
+            TeloptPattern(byteArrayOf(TC.IAC, TC.DONT, TO.MXP))
+                { s, _, _, _ -> s.processDontMxp(); 3 },
 
             // MCCP2
             TeloptPattern(byteArrayOf(TC.IAC, TC.DO, TO.MCCP2))
@@ -728,6 +741,19 @@ class TelnetSession(
         return sbLen
     }
 
+    // -- Handler: MXP --
+
+    private fun processDoMxp() {
+        if (CommFlags.MXP in commFlags) return
+        commFlags = commFlags.insert(CommFlags.MXP)
+        write(MXP_LOCKED_DEFAULT)
+        log("INFO MXP ENABLED")
+    }
+
+    private fun processDontMxp() {
+        commFlags = commFlags.remove(CommFlags.MXP)
+    }
+
     // -- Handler: GMCP --
 
     private fun processDoGmcp() {
@@ -856,5 +882,11 @@ class TelnetSession(
         if (mccp3 == null) return
         log("MCCP3: COMPRESSION END")
         mccp3 = null
+    }
+
+    private companion object {
+        // ESC[7z — Lock Locked: makes "locked" the persistent default line mode so normal
+        // output is never parsed as MXP markup; links opt back in per-span with ESC[1z…ESC[2z.
+        val MXP_LOCKED_DEFAULT = byteArrayOf(0x1B, 0x5B, 0x37, 0x7A)
     }
 }

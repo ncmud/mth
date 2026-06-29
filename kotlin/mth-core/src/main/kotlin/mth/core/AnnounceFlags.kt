@@ -32,6 +32,6 @@ val defaultTelnetTable: List<TelnetOptionEntry> = buildList {
     this[86] = TelnetOptionEntry("MCCP2", AnnounceFlags.WILL)
     this[87] = TelnetOptionEntry("MCCP3", AnnounceFlags.WILL)
     this[90] = TelnetOptionEntry("MSP", AnnounceFlags.WILL)
-    this[91] = TelnetOptionEntry("MXP")
+    this[91] = TelnetOptionEntry("MXP", AnnounceFlags.WILL)
     this[201] = TelnetOptionEntry("GMCP", AnnounceFlags.WILL)
 }

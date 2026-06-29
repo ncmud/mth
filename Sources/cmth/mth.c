@@ -180,7 +180,7 @@ struct telnet_type telnet_table[] =
 	{    "88",                    0 },
 	{    "89",                    0 },
 	{    "MSP",                   0 },
-	{    "MXP",                   0 },
+	{    "MXP",                   ANNOUNCE_WILL },
 	{    "MSP2",                  0 }, /* Unadopted */
 	{    "ZMP",                   0 }, /* Unadopted */
 	{    "94",                    0 },
