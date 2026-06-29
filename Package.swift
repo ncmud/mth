@@ -8,8 +8,12 @@ var products: [Product] = [
 ]
 
 var targets: [Target] = [
-    // Thin C wrapper exposing system zlib to Swift.
-    // zlib is present on macOS (SDK) and Linux (Swift toolchain dependency).
+    // Thin C wrapper exposing system zlib to Swift. The dependency below is gated to the
+    // platforms we build for and know ship zlib (macOS SDK, Linux toolchain). A platform
+    // condition is evaluated against the build *destination*, so this stays correct under
+    // cross-compilation — unlike a manifest `#if os(...)`, which keys off the host. On
+    // any other destination (Windows, wasm) CZlib drops out of the graph and the
+    // `#if canImport(CZlib)`-guarded MCCP compression compiles out.
     .target(
         name: "CZlib",
         path: "Sources/CZlib",
@@ -20,7 +24,7 @@ var targets: [Target] = [
     .target(
         name: "MTHCore",
         dependencies: [
-            "CZlib",
+            .target(name: "CZlib", condition: .when(platforms: [.macOS, .linux])),
         ],
         path: "Sources/SwiftMTHCore"
     ),
