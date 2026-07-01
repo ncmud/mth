@@ -14,5 +14,8 @@ value class MTTSFlags(val rawValue: Int = 0) {
         val SCREEN_READER = MTTSFlags(1 shl 6)
         val PROXY = MTTSFlags(1 shl 7)
         val TRUE_COLOR = MTTSFlags(1 shl 8)
+        val MNES = MTTSFlags(1 shl 9)
+        val MSLP = MTTSFlags(1 shl 10)
+        val SSL = MTTSFlags(1 shl 11)
     }
 }

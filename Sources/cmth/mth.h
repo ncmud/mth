@@ -53,6 +53,8 @@ typedef struct descriptor_data    DESCRIPTOR_DATA;
 #define BV08            (1   <<  7)
 #define BV09            (1   <<  8)
 #define BV10            (1   <<  9)
+#define BV11            (1   <<  10)
+#define BV12            (1   <<  11)
 
 #define COMM_FLAG_DISCONNECT    BV01
 #define COMM_FLAG_PASSWORD      BV02
@@ -83,6 +85,9 @@ typedef struct descriptor_data    DESCRIPTOR_DATA;
 #define MTTS_FLAG_SCREENREADER  BV07
 #define MTTS_FLAG_PROXY         BV08
 #define MTTS_FLAG_TRUECOLOR     BV09
+#define MTTS_FLAG_MNES          BV10
+#define MTTS_FLAG_MSLP          BV11
+#define MTTS_FLAG_SSL           BV12
 
 /*
 	Mud data, structure containing global variables.
