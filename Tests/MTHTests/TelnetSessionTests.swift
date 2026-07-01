@@ -353,6 +353,20 @@ private func makeSession() -> (TelnetSession, FakeDelegate) {
     #expect(s.mttsFlags.contains(.colors256))
     #expect(s.commFlags.contains(.colors256))
     #expect(s.commFlags.contains(.utf8))
+    // No MSLP bit in this bitvector.
+    #expect(!s.mttsFlags.contains(.mslp))
+}
+
+@Test func sbTtypeIsMTTSDetectsMSLP() {
+    let (s, _) = makeSession()
+    let first: [UInt8] = [IAC, SB, TTYPE, ENV_IS] + Array("TINTIN++".utf8) + [IAC, SE]
+    _ = s.processInput(first)
+
+    // ANSI(1) + VT100(2) + UTF8(4) + 256COLOR(8) + MSLP(1024) = 1039
+    let mtts: [UInt8] = [IAC, SB, TTYPE, ENV_IS] + Array("MTTS 1039".utf8) + [IAC, SE]
+    _ = s.processInput(mtts)
+
+    #expect(s.mttsFlags.contains(.mslp))
 }
 
 @Test func sbTtypeIsXtermSets256Color() {

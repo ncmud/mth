@@ -18,4 +18,7 @@ public struct MTTSFlags: OptionSet, Sendable {
     public static let screenReader   = MTTSFlags(rawValue: 1 << 6)
     public static let proxy          = MTTSFlags(rawValue: 1 << 7)
     public static let trueColor      = MTTSFlags(rawValue: 1 << 8)
+    public static let mnes           = MTTSFlags(rawValue: 1 << 9)
+    public static let mslp           = MTTSFlags(rawValue: 1 << 10)
+    public static let ssl            = MTTSFlags(rawValue: 1 << 11)
 }
