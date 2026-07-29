@@ -126,6 +126,33 @@ public final class TelnetSession {
         }
     }
 
+    /// Re-send `IAC WILL` for every table option that is not already in effect.
+    /// For a session whose negotiated state was reconstructed rather than
+    /// negotiated, this is the only way an option the client never agreed to
+    /// gets offered again — no client volunteers `DO` unprompted.
+    ///
+    /// The `.do` half of the table is deliberately left alone: re-offering
+    /// TTYPE/NAWS/NEW_ENVIRON restarts subnegotiation for data already held.
+    public func reannounceWillOptions() {
+        for i in 0..<min(telnetTable.count, 255)
+        where telnetTable[i].announce.contains(.will) && !isOptionActive(UInt8(i)) {
+            write([TC.IAC, TC.WILL, UInt8(i)])
+        }
+    }
+
+    /// An option whose state this session does not track answers `false`, so a
+    /// caller re-offers it rather than assuming it survived.
+    private func isOptionActive(_ option: UInt8) -> Bool {
+        switch option {
+        case TO.EOR: commFlags.contains(.eor)
+        case TO.MSDP: msdpManager != nil
+        case TO.MCCP2: isMCCP2Active
+        case TO.MXP: commFlags.contains(.mxp)
+        case TO.GMCP: commFlags.contains(.gmcp)
+        default: false
+        }
+    }
+
     /// Re-send IAC WILL GMCP to the client. Uses the internal write path
     /// so MCCP2 compression is handled correctly.
     public func reannounceGMCP() {
@@ -311,6 +338,8 @@ public final class TelnetSession {
         var patterns: [TeloptPattern] = [
             TeloptPattern(pattern: [TC.IAC, TC.DO, TO.EOR],
                           handler: { s, src, i, n in s.processDoEOR(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.DONT, TO.EOR],
+                          handler: { s, src, i, n in s.processDontEOR(); return 3 }),
 
             TeloptPattern(pattern: [TC.IAC, TC.WILL, TO.TTYPE],
                           handler: { s, src, i, n in s.processWillTtype(); return 3 }),
@@ -444,6 +473,10 @@ public final class TelnetSession {
 
     private func processDoEOR() {
         commFlags.insert(.eor)
+    }
+
+    private func processDontEOR() {
+        commFlags.remove(.eor)
     }
 
     // MARK: - Handler: Terminal Type
