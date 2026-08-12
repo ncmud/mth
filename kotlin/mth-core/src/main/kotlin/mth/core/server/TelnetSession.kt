@@ -116,9 +116,13 @@ class TelnetSession(
     /** Whether the client negotiated MXP (telnet option 91). */
     val mxpEnabled: Boolean get() = CommFlags.MXP in commFlags
 
-    /** Re-assert the locked-default MXP line mode after a copyover restore. */
+    /** Re-assert MXP after a copyover restore: resends the start command and the
+     * locked-default line mode. */
     fun reassertMXP() {
-        if (CommFlags.MXP in commFlags) write(MXP_LOCKED_DEFAULT)
+        if (CommFlags.MXP in commFlags) {
+            write(MXP_START)
+            write(MXP_LOCKED_DEFAULT)
+        }
     }
 
     /** Send echo-off (password mode). */
@@ -746,6 +750,7 @@ class TelnetSession(
     private fun processDoMxp() {
         if (CommFlags.MXP in commFlags) return
         commFlags = commFlags.insert(CommFlags.MXP)
+        write(MXP_START)
         write(MXP_LOCKED_DEFAULT)
         log("INFO MXP ENABLED")
     }
@@ -888,5 +893,9 @@ class TelnetSession(
         // ESC[7z — Lock Locked: makes "locked" the persistent default line mode so normal
         // output is never parsed as MXP markup; links opt back in per-span with ESC[1z…ESC[2z.
         val MXP_LOCKED_DEFAULT = byteArrayOf(0x1B, 0x5B, 0x37, 0x7A)
+
+        // The MXP start command: WILL/DO only agrees the option; strict clients
+        // stay inert until they receive this subnegotiation.
+        val MXP_START = byteArrayOf(TC.IAC, TC.SB, TO.MXP, TC.IAC, TC.SE)
     }
 }

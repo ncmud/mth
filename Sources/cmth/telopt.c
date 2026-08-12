@@ -879,6 +879,10 @@ int process_do_mxp( DESCRIPTOR_DATA *d, unsigned char *src, int srclen )
 
 	SET_BIT(d->mth->comm_flags, COMM_FLAG_MXP);
 
+	/* The MXP start command: WILL/DO only agrees the option; strict clients
+	   stay inert until they receive this subnegotiation. */
+	descriptor_printf(d, "%c%c%c%c%c", IAC, SB, TELOPT_MXP, IAC, SE);
+
 	/* ESC[7z — Lock Locked: make "locked" the persistent default line mode, so
 	   normal output is never parsed as MXP markup. Links opt back in per-span. */
 	descriptor_printf(d, "\033[7z");

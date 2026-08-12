@@ -33,6 +33,7 @@ private const val MSDP: Byte = 69
 private const val MSSP: Byte = 70
 private const val MCCP2: Byte = 86
 private const val MCCP3: Byte = 87
+private const val MXP: Byte = 91
 private const val GMCP: Byte = 0xC9.toByte()
 
 // Sub-negotiation constants
@@ -110,16 +111,22 @@ class TelnetSessionTest {
     @Test fun doMxpEnablesAndLocksDefault() {
         val (s, d) = makeSession()
         assertFalse(s.mxpEnabled)
-        s.processInput(bytes(0xFF, 0xFD, 91))
+        s.processInput(byteArrayOf(IAC, DO, MXP))
         assertTrue(s.mxpEnabled)
         assertTrue(d.allWrittenBytes.containsSequence(bytes(0x1B, 0x5B, 0x37, 0x7A)))
     }
 
+    @Test fun doMxpSendsStartCommand() {
+        val (s, d) = makeSession()
+        s.processInput(byteArrayOf(IAC, DO, MXP))
+        assertTrue(d.allWrittenBytes.containsSequence(byteArrayOf(IAC, SB, MXP, IAC, SE)))
+    }
+
     @Test fun dontMxpDisables() {
         val (s, _) = makeSession()
-        s.processInput(bytes(0xFF, 0xFD, 91))
+        s.processInput(byteArrayOf(IAC, DO, MXP))
         assertTrue(s.mxpEnabled)
-        s.processInput(bytes(0xFF, 0xFE, 91))
+        s.processInput(byteArrayOf(IAC, DONT, MXP))
         assertFalse(s.mxpEnabled)
     }
 

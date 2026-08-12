@@ -162,10 +162,11 @@ public final class TelnetSession {
     /// Whether the client negotiated MXP (telnet option 91).
     public var mxpEnabled: Bool { commFlags.contains(.mxp) }
 
-    /// Re-assert the locked-default MXP line mode after a copyover restore, for a
-    /// client that had MXP enabled. See `processDoMxp`.
+    /// Re-assert MXP after a copyover restore, for a client that had MXP enabled:
+    /// resends the start command and the locked-default line mode. See `processDoMxp`.
     public func reassertMXP() {
         guard commFlags.contains(.mxp) else { return }
+        write(TelnetSession.mxpStart)
         write(TelnetSession.mxpLockedDefault)
     }
 
@@ -776,9 +777,15 @@ public final class TelnetSession {
     /// Links opt back in per-span with `ESC[1z … ESC[2z`. (Zugg MXP line-mode spec.)
     private static let mxpLockedDefault: [UInt8] = [0x1B, 0x5B, 0x37, 0x7A]
 
+    /// The MXP start command: tells the client to begin parsing MXP. WILL/DO only
+    /// agrees the option; strict clients stay inert until they receive this
+    /// subnegotiation.
+    private static let mxpStart: [UInt8] = [TC.IAC, TC.SB, TO.MXP, TC.IAC, TC.SE]
+
     private func processDoMxp() {
         guard !commFlags.contains(.mxp) else { return }
         commFlags.insert(.mxp)
+        write(TelnetSession.mxpStart)
         write(TelnetSession.mxpLockedDefault)
         log("INFO MXP ENABLED")
     }
