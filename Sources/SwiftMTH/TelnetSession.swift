@@ -13,11 +13,69 @@ public final class TelnetSession {
     // MARK: - Public State
 
     public weak var delegate: TelnetSessionDelegate?
-    public private(set) var terminalType: String = ""
-    public private(set) var mttsFlags: MTTSFlags = []
+    public private(set) var ttypeTerminalType: String = ""
+    public private(set) var ttypeMTTSFlags: MTTSFlags = []
     public private(set) var windowSize: (cols: Int, rows: Int) = (0, 0)
-    public private(set) var commFlags: CommFlags = []
-    public private(set) var proxy: String = ""
+    public private(set) var baseCommFlags: CommFlags = []
+    private var restoredProxy: String = ""
+    public var proxy: String { environment.ipAddress ?? restoredProxy }
+    public private(set) var environment = MNESEnvironment()
+    public private(set) var newEnvironEnabled = false
+    public private(set) var hasTTYPEMTTS = false
+    public var hasMTTS: Bool { environment.mtts != nil || hasTTYPEMTTS }
+    /// MNES terminal type, falling back to the first TTYPE report.
+    public var terminalType: String { environment.terminalType ?? ttypeTerminalType }
+    /// MNES MTTS report, falling back to TTYPE MTTS. Use ``commFlags`` for charset-aware UTF-8 support.
+    public var mttsFlags: MTTSFlags { environment.mtts.map(MTTSFlags.init(rawValue:)) ?? ttypeMTTSFlags }
+    /// Effective flags: MNES MTTS overrides base capabilities, and MNES CHARSET overrides the UTF-8 bit.
+    public var commFlags: CommFlags {
+        var flags = baseCommFlags
+        if ttypeMTTSFlags.contains(.utf8) { flags.insert(.utf8) }
+        if ttypeMTTSFlags.contains(.colors256) { flags.insert(.colors256) }
+        if let mtts = environment.mtts {
+            flags.remove([.utf8, .colors256])
+            if mtts & MTTSFlags.utf8.rawValue != 0 { flags.insert(.utf8) }
+            if mtts & MTTSFlags.colors256.rawValue != 0 { flags.insert(.colors256) }
+        }
+        if let charset = environment.charset {
+            flags.remove(.utf8)
+            if charset == "UTF-8" { flags.insert(.utf8) }
+        }
+        return flags
+    }
+
+    /// Restores validated environment metadata without sending negotiations.
+    public func restoreEnvironment(_ environment: MNESEnvironment, enabled: Bool, hasTTYPEMTTS: Bool) {
+        self.restoredProxy = ""
+        self.environment = environment.validated
+        self.newEnvironEnabled = enabled
+        self.hasTTYPEMTTS = hasTTYPEMTTS
+    }
+
+    /// Requests the standard variables, offering NEW-ENVIRON first if needed.
+    public func requestEnvironment() {
+        if newEnvironEnabled {
+            write(NewEnviron.packet(command: TS.ENV_SEND, entries: []))
+            write(NewEnviron.packet(command: TS.ENV_SEND, entries: [.init(name: "SYSTEMTYPE")]))
+        } else {
+            write([TC.IAC, TC.DO, TO.NEW_ENVIRON])
+        }
+    }
+
+    /// Resets NEW-ENVIRON when restoring a snapshot without its negotiation state.
+    public func renegotiateEnvironment() {
+        disableEnvironment()
+        write([TC.IAC, TC.DONT, TO.NEW_ENVIRON])
+        write([TC.IAC, TC.DO, TO.NEW_ENVIRON])
+    }
+
+    private func disableEnvironment() {
+        restoredProxy = ""
+        newEnvironEnabled = false
+        let previous = environment
+        environment = MNESEnvironment()
+        if previous != environment { delegate?.telnetSession(self, environmentChanged: environment) }
+    }
 
     /// The MSDP manager for this session. Created lazily when MSDP/GMCP is negotiated.
     public private(set) var msdpManager: MSDPManager?
@@ -46,6 +104,7 @@ public final class TelnetSession {
 
     /// Buffer for incomplete telnet sequences (packet fragmentation).
     private var telbuf: [UInt8] = []
+    private var oversizedEnvironmentIAC: Bool?
 
     #if canImport(CZlib)
     /// MCCP2 deflate stream (server→client output compression).
@@ -70,7 +129,7 @@ public final class TelnetSession {
     /// Restore a TelnetSession from saved copyover state.
     /// Sets negotiated flags directly without sending announcements to the client.
     public init(
-        restoring commFlags: CommFlags,
+        restoring baseCommFlags: CommFlags,
         mttsFlags: MTTSFlags,
         terminalType: String,
         windowSize: (cols: Int, rows: Int),
@@ -82,11 +141,12 @@ public final class TelnetSession {
         self.delegate = delegate
         self.telnetTable = telnetTable
         self.msdpTable = msdpTable
-        self.commFlags = commFlags
-        self.mttsFlags = mttsFlags
-        self.terminalType = terminalType
+        self.baseCommFlags = baseCommFlags
+        self.hasTTYPEMTTS = mttsFlags.rawValue != 0
+        self.ttypeMTTSFlags = mttsFlags
+        self.ttypeTerminalType = terminalType
         self.windowSize = windowSize
-        self.proxy = proxy
+        self.restoredProxy = MNESEnvironment.isIPAddress(proxy) ? proxy : ""
     }
 
     // MARK: - Connection Lifecycle
@@ -109,6 +169,7 @@ public final class TelnetSession {
 
     /// Unannounce support (e.g. before copyover).
     public func unannounceSupport() {
+        disableEnvironment()
         #if canImport(CZlib)
         endMCCP2()
         endMCCP3()
@@ -144,11 +205,11 @@ public final class TelnetSession {
     /// caller re-offers it rather than assuming it survived.
     private func isOptionActive(_ option: UInt8) -> Bool {
         switch option {
-        case TO.EOR: commFlags.contains(.eor)
+        case TO.EOR: baseCommFlags.contains(.eor)
         case TO.MSDP: msdpManager != nil
         case TO.MCCP2: isMCCP2Active
-        case TO.MXP: commFlags.contains(.mxp)
-        case TO.GMCP: commFlags.contains(.gmcp)
+        case TO.MXP: baseCommFlags.contains(.mxp)
+        case TO.GMCP: baseCommFlags.contains(.gmcp)
         default: false
         }
     }
@@ -160,31 +221,31 @@ public final class TelnetSession {
     }
 
     /// Whether the client negotiated MXP (telnet option 91).
-    public var mxpEnabled: Bool { commFlags.contains(.mxp) }
+    public var mxpEnabled: Bool { baseCommFlags.contains(.mxp) }
 
     /// Re-assert MXP after a copyover restore, for a client that had MXP enabled:
     /// resends the start command and the locked-default line mode. See `processDoMxp`.
     public func reassertMXP() {
-        guard commFlags.contains(.mxp) else { return }
+        guard baseCommFlags.contains(.mxp) else { return }
         write(TelnetSession.mxpStart)
         write(TelnetSession.mxpLockedDefault)
     }
 
     /// Send echo-off (password mode).
     public func sendEchoOff() {
-        commFlags.insert(.password)
+        baseCommFlags.insert(.password)
         write([TC.IAC, TC.WILL, TO.ECHO])
     }
 
     /// Send echo-on (normal mode).
     public func sendEchoOn() {
-        commFlags.remove(.password)
+        baseCommFlags.remove(.password)
         write([TC.IAC, TC.WONT, TO.ECHO])
     }
 
     /// Send End-of-Record marker (prompt marker).
     public func sendEOR() {
-        if commFlags.contains(.eor) {
+        if baseCommFlags.contains(.eor) {
             write([TC.IAC, TC.EOR])
         }
     }
@@ -197,7 +258,7 @@ public final class TelnetSession {
     /// Send a GMCP packet with the given module name and JSON payload.
     /// Only sends if the client negotiated GMCP.
     public func sendGMCP(_ module: String, json: String) {
-        guard commFlags.contains(.gmcp) else { return }
+        guard baseCommFlags.contains(.gmcp) else { return }
         var packet: [UInt8] = [TC.IAC, TC.SB, TO.GMCP]
         packet.append(contentsOf: module.utf8)
         packet.append(UInt8(ascii: " "))
@@ -259,6 +320,11 @@ public final class TelnetSession {
         var i = 0
 
         while i < input.count {
+            if let pendingIAC = oversizedEnvironmentIAC {
+                oversizedEnvironmentIAC = pendingIAC ? (input[i] == TC.SE ? nil : false) : input[i] == TC.IAC
+                i += 1
+                continue
+            }
             switch input[i] {
             case TC.IAC:
                 let remaining = input.count - i
@@ -352,6 +418,8 @@ public final class TelnetSession {
 
             TeloptPattern(pattern: [TC.IAC, TC.WILL, TO.NEW_ENVIRON],
                           handler: { s, src, i, n in s.processWillNewEnviron(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.WONT, TO.NEW_ENVIRON],
+                          handler: { s, _, _, _ in s.disableEnvironment(); return 3 }),
             TeloptPattern(pattern: [TC.IAC, TC.SB, TO.NEW_ENVIRON],
                           handler: { s, src, i, n in s.processSbNewEnviron(src, at: i, srclen: n) }),
 
@@ -473,17 +541,17 @@ public final class TelnetSession {
     // MARK: - Handler: EOR
 
     private func processDoEOR() {
-        commFlags.insert(.eor)
+        baseCommFlags.insert(.eor)
     }
 
     private func processDontEOR() {
-        commFlags.remove(.eor)
+        baseCommFlags.remove(.eor)
     }
 
     // MARK: - Handler: Terminal Type
 
     private func processWillTtype() {
-        if terminalType.isEmpty {
+        if ttypeTerminalType.isEmpty {
             // Request terminal type 3 times for MTTS detection, then reset
             let request: [UInt8] = [TC.IAC, TC.SB, TO.TTYPE, TS.ENV_SEND, TC.IAC, TC.SE]
             write(request)
@@ -508,19 +576,20 @@ public final class TelnetSession {
         }
         let value = String(decoding: val, as: UTF8.self)
 
-        if terminalType.isEmpty {
-            terminalType = value
+        if ttypeTerminalType.isEmpty {
+            ttypeTerminalType = value
         } else {
             // Check for MTTS flags
             if value.uppercased().hasPrefix("MTTS ") {
                 if let flags = Int(value.dropFirst(5).trimmingCharacters(in: .whitespaces)) {
-                    mttsFlags = MTTSFlags(rawValue: flags)
+                    hasTTYPEMTTS = true
+                    ttypeMTTSFlags = MTTSFlags(rawValue: flags)
 
-                    if mttsFlags.contains(.colors256) {
-                        commFlags.insert(.colors256)
+                    if ttypeMTTSFlags.contains(.colors256) {
+                        baseCommFlags.insert(.colors256)
                     }
-                    if mttsFlags.contains(.utf8) {
-                        commFlags.insert(.utf8)
+                    if ttypeMTTSFlags.contains(.utf8) {
+                        baseCommFlags.insert(.utf8)
                     }
                 }
             }
@@ -528,7 +597,7 @@ public final class TelnetSession {
             // Detect 256-color terminals by name
             let upper = value.uppercased()
             if upper.contains("-256COLOR") || upper == "XTERM" {
-                commFlags.insert(.colors256)
+                baseCommFlags.insert(.colors256)
             }
         }
 
@@ -573,61 +642,33 @@ public final class TelnetSession {
     // MARK: - Handler: NEW-ENVIRON
 
     private func processWillNewEnviron() {
-        var packet: [UInt8] = [TC.IAC, TC.SB, TO.NEW_ENVIRON, TS.ENV_SEND, TS.ENV_VAR]
-        packet.append(contentsOf: "SYSTEMTYPE".utf8)
-        packet.append(TC.IAC)
-        packet.append(TC.SE)
-        write(packet)
+        guard !newEnvironEnabled else { return }
+        newEnvironEnabled = true
+        requestEnvironment()
     }
 
     private func processSbNewEnviron(_ src: [UInt8], at offset: Int, srclen: Int) -> Int {
-        let sbLen = skipSB(src, at: offset, srclen: srclen)
-        if sbLen > srclen { return srclen + 1 }
-
-        var varName = ""
-        var j = offset + 4
-        let end = offset + srclen
-        let subCommand = src[offset + 3] // ENV_IS, ENV_SEND, or ENV_INFO
-
-        while j < end && src[j] != TC.SE {
-            switch src[j] {
-            case TS.ENV_VAR, TS.ENV_USR:
-                j += 1
-                var buf: [UInt8] = []
-                while j < end && src[j] >= 32 && src[j] != TC.IAC {
-                    buf.append(src[j])
-                    j += 1
-                }
-                varName = String(decoding: buf, as: UTF8.self)
-
-            case TS.ENV_VAL:
-                j += 1
-                var buf: [UInt8] = []
-                while j < end && src[j] >= 32 && src[j] != TC.IAC {
-                    buf.append(src[j])
-                    j += 1
-                }
-                let valName = String(decoding: buf, as: UTF8.self)
-
-                if subCommand == TS.ENV_IS {
-                    if varName.caseInsensitiveCompare("SYSTEMTYPE") == .orderedSame
-                        && valName.caseInsensitiveCompare("WIN32") == .orderedSame {
-                        if terminalType.caseInsensitiveCompare("ANSI") == .orderedSame {
-                            commFlags.insert(.remoteEcho)
-                            terminalType = "WINDOWS TELNET"
-                        }
-                    }
-                    if varName.caseInsensitiveCompare("IPADDRESS") == .orderedSame {
-                        proxy = valName
-                    }
-                }
-
-            default:
-                j += 1
+        guard let length = NewEnviron.frameLength(src, at: offset) else {
+            if srclen > 8192 {
+                oversizedEnvironmentIAC = src.reversed().prefix(while: { $0 == TC.IAC }).count % 2 == 1
+                return srclen
+            }
+            return srclen + 1
+        }
+        guard newEnvironEnabled,
+              let message = NewEnviron.decode(Array(src[offset..<offset + length])),
+              message.command == TS.ENV_IS || message.command == TS.ENV_INFO else { return length }
+        let previous = environment
+        if message.entries.contains(where: { $0.name == "IPADDRESS" }) { restoredProxy = "" }
+        environment.apply(message.entries)
+        for entry in message.entries where entry.name.uppercased() == "SYSTEMTYPE" {
+            if entry.value?.uppercased() == "WIN32", ttypeTerminalType.uppercased() == "ANSI" {
+                baseCommFlags.insert(.remoteEcho)
+                ttypeTerminalType = "WINDOWS TELNET"
             }
         }
-
-        return sbLen
+        if previous != environment { delegate?.telnetSession(self, environmentChanged: environment) }
+        return length
     }
 
     // MARK: - Handler: CHARSET
@@ -659,11 +700,11 @@ public final class TelnetSession {
 
             if subCommand == TS.CHARSET_ACCEPTED {
                 if charset.caseInsensitiveCompare("UTF-8") == .orderedSame {
-                    commFlags.insert(.utf8)
+                    baseCommFlags.insert(.utf8)
                 }
             } else if subCommand == TS.CHARSET_REJECTED {
                 if charset.caseInsensitiveCompare("UTF-8") == .orderedSame {
-                    commFlags.remove(.utf8)
+                    baseCommFlags.remove(.utf8)
                 }
             }
             j += 1
@@ -717,7 +758,7 @@ public final class TelnetSession {
                 self.log(message)
             }
         )
-        msdpManager?.usesGMCP = commFlags.contains(.gmcp)
+        msdpManager?.usesGMCP = baseCommFlags.contains(.gmcp)
         msdpManager?.updateVariable("SPECIFICATION", value: "http://tintin.sourceforge.net/msdp")
     }
 
@@ -783,21 +824,21 @@ public final class TelnetSession {
     private static let mxpStart: [UInt8] = [TC.IAC, TC.SB, TO.MXP, TC.IAC, TC.SE]
 
     private func processDoMxp() {
-        guard !commFlags.contains(.mxp) else { return }
-        commFlags.insert(.mxp)
+        guard !baseCommFlags.contains(.mxp) else { return }
+        baseCommFlags.insert(.mxp)
         write(TelnetSession.mxpStart)
         write(TelnetSession.mxpLockedDefault)
         log("INFO MXP ENABLED")
     }
 
     private func processDontMxp() {
-        commFlags.remove(.mxp)
+        baseCommFlags.remove(.mxp)
     }
 
     // MARK: - Handler: GMCP
 
     private func processDoGmcp() {
-        commFlags.insert(.gmcp)
+        baseCommFlags.insert(.gmcp)
         if msdpManager != nil {
             msdpManager?.usesGMCP = true
             log("INFO GMCP ENABLED (MSDP already active)")
@@ -905,7 +946,7 @@ public final class TelnetSession {
         guard let stream = mccp2 else { return }
 
         // Flush remaining compressed data
-        if !commFlags.contains(.disconnect) {
+        if !baseCommFlags.contains(.disconnect) {
             if let final = stream.finish() {
                 delegate?.telnetSession(self, write: final)
             }

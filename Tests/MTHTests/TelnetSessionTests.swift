@@ -417,13 +417,14 @@ private func makeSession() -> (TelnetSession, FakeDelegate) {
     let (s, d) = makeSession()
     _ = s.processInput([IAC, WILL, NEW_ENVIRON])
 
-    let expected: [UInt8] = [IAC, SB, NEW_ENVIRON, ENV_SEND, ENV_VAR]
-        + Array("SYSTEMTYPE".utf8) + [IAC, SE]
+    let expected = [IAC, SB, NEW_ENVIRON, ENV_SEND, IAC, SE]
+        + NewEnviron.packet(command: ENV_SEND, entries: [.init(name: "SYSTEMTYPE")])
     #expect(d.allWrittenBytes == expected)
 }
 
 @Test func sbNewEnvironWin32Detection() {
     let (s, _) = makeSession()
+    _ = s.processInput([IAC, WILL, NEW_ENVIRON])
     // First set terminal type to ANSI
     let ttype: [UInt8] = [IAC, SB, TTYPE, ENV_IS] + Array("ANSI".utf8) + [IAC, SE]
     _ = s.processInput(ttype)
@@ -441,6 +442,7 @@ private func makeSession() -> (TelnetSession, FakeDelegate) {
 
 @Test func sbNewEnvironIPAddress() {
     let (s, _) = makeSession()
+    _ = s.processInput([IAC, WILL, NEW_ENVIRON])
     let packet: [UInt8] = [IAC, SB, NEW_ENVIRON, ENV_IS,
                            ENV_VAR] + Array("IPADDRESS".utf8)
         + [ENV_VAL] + Array("192.168.1.100".utf8) + [IAC, SE]

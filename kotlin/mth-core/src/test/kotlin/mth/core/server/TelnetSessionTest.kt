@@ -414,13 +414,14 @@ class TelnetSessionTest {
         val (s, d) = makeSession()
         s.processInput(byteArrayOf(IAC, WILL, NEW_ENVIRON))
 
-        val expected = byteArrayOf(IAC, SB, NEW_ENVIRON, ENV_SEND, ENV_VAR) +
-            textBytes("SYSTEMTYPE") + byteArrayOf(IAC, SE)
+        val expected = byteArrayOf(IAC, SB, NEW_ENVIRON, ENV_SEND, IAC, SE) +
+            NewEnviron.packet(ENV_SEND, listOf(NewEnviron.Entry("SYSTEMTYPE")))
         assertContentEquals(expected, d.allWrittenBytes)
     }
 
     @Test fun sbNewEnvironWin32Detection() {
         val (s, _) = makeSession()
+        s.processInput(byteArrayOf(IAC, WILL, NEW_ENVIRON))
         val ttype = byteArrayOf(IAC, SB, TTYPE, ENV_IS) + textBytes("ANSI") + byteArrayOf(IAC, SE)
         s.processInput(ttype)
         assertEquals("ANSI", s.terminalType)
@@ -435,6 +436,7 @@ class TelnetSessionTest {
 
     @Test fun sbNewEnvironIPAddress() {
         val (s, _) = makeSession()
+        s.processInput(byteArrayOf(IAC, WILL, NEW_ENVIRON))
         val packet = byteArrayOf(IAC, SB, NEW_ENVIRON, ENV_IS, ENV_VAR) +
             textBytes("IPADDRESS") + byteArrayOf(ENV_VAL) + textBytes("192.168.1.100") + byteArrayOf(IAC, SE)
         s.processInput(packet)

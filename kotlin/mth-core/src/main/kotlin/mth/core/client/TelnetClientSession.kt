@@ -14,10 +14,84 @@ private typealias TS = TelnetSub
  */
 class TelnetClientSession(
     var delegate: TelnetClientDelegate? = null,
-    var terminalType: String = "MTH",
+    terminalType: String = "MTH",
     var windowWidth: Int = 80,
-    var windowHeight: Int = 24
+    var windowHeight: Int = 24,
+    mttsFlags: Int = 137,
+    clientName: String? = null,
+    clientVersion: String? = null,
+    charset: String? = null,
+    ipAddress: String? = null
 ) {
+    var terminalType = terminalType
+        set(value) { field = value; publishEnvironment() }
+    var mttsFlags = mttsFlags
+        set(value) { field = value; publishEnvironment() }
+    var clientName = clientName
+        set(value) { field = value; publishEnvironment() }
+    var clientVersion = clientVersion
+        set(value) { field = value; publishEnvironment() }
+    var charset = charset
+        set(value) { field = value; publishEnvironment() }
+    var ipAddress = ipAddress
+        set(value) { field = value; publishEnvironment() }
+    val newEnvironEnabled: Boolean get() = TO.NEW_ENVIRON in clientOptions
+    private val requestedEnvironment = mutableMapOf<String, Boolean>()
+    private val lastEnvironment = mutableMapOf<String, String?>()
+    private val advertisedMTTS: Int get() {
+        var flags = mttsFlags or MTTSFlags.MNES.rawValue
+        charset?.let {
+            flags = flags and MTTSFlags.UTF8.rawValue.inv()
+            if (it.equals("UTF-8", ignoreCase = true)) flags = flags or MTTSFlags.UTF8.rawValue
+        }
+        return flags
+    }
+    private val environment: MNESEnvironment get() = MNESEnvironment(
+        clientName = clientName ?: terminalType, clientVersion = clientVersion,
+        charset = charset ?: if (mttsFlags and MTTSFlags.UTF8.rawValue != 0) "UTF-8" else "ASCII",
+        ipAddress = ipAddress, mtts = advertisedMTTS, terminalType = terminalType).validated
+
+    private fun enableEnvironment() {
+        if (clientOptions.add(TO.NEW_ENVIRON)) write(byteArrayOf(TC.IAC, TC.WILL, TO.NEW_ENVIRON))
+    }
+    private fun disableEnvironment() {
+        if (clientOptions.remove(TO.NEW_ENVIRON)) write(byteArrayOf(TC.IAC, TC.WONT, TO.NEW_ENVIRON))
+        requestedEnvironment.clear()
+        lastEnvironment.clear()
+    }
+    private fun processEnvironment(src: ByteArray, offset: Int, remaining: Int): Int {
+        val length = NewEnviron.frameLength(src, offset) ?: run {
+            if (remaining > 8192) {
+                oversizedEnvironmentIAC = src.reversed().takeWhile { it == TC.IAC }.size % 2 == 1
+                return remaining
+            }
+            return remaining + 1
+        }
+        if (!newEnvironEnabled) return length
+        val message = NewEnviron.decode(src.copyOfRange(offset, offset + length)) ?: return length
+        if (message.command != TS.ENV_SEND || message.entries.any { it.value != null }) return length
+        val requests = message.entries.ifEmpty { listOf(NewEnviron.Entry("")) }
+        val entries = requests.flatMap { entry ->
+            if (entry.name.isEmpty()) MNESEnvironment.variableNames.map { NewEnviron.Entry(it, userDefined = entry.userDefined) }
+            else listOf(entry)
+        }
+        val variables = environment.variables
+        for (entry in entries) {
+            if (entry.name in MNESEnvironment.variableNames) requestedEnvironment[entry.name] = entry.userDefined
+            lastEnvironment[entry.name] = variables[entry.name]
+        }
+        write(NewEnviron.packet(TS.ENV_IS, entries.map { NewEnviron.Entry(it.name, variables[it.name], it.userDefined) }))
+        return length
+    }
+    private fun publishEnvironment() {
+        if (!newEnvironEnabled) return
+        val variables = environment.variables
+        val changed = requestedEnvironment.keys.sorted().filter { variables[it] != lastEnvironment[it] }
+        if (changed.isEmpty()) return
+        for (name in changed) lastEnvironment[name] = variables[name]
+        write(NewEnviron.packet(TS.ENV_INFO, changed.map { NewEnviron.Entry(it, variables[it], requestedEnvironment[it] ?: false) }))
+    }
+
     // -- Public State --
 
     /** Whether MCCP2 decompression is active for inbound data. */
@@ -47,6 +121,7 @@ class TelnetClientSession(
 
     /** Buffer for incomplete telnet sequences (packet fragmentation). */
     private var telbuf: MutableList<Byte> = mutableListOf()
+    private var oversizedEnvironmentIAC: Boolean? = null
 
     /** MCCP2 inflate stream (decompress server→client data). */
     private var mccp2: InflateStream? = null
@@ -130,6 +205,12 @@ class TelnetClientSession(
         var i = 0
 
         while (i < input.size) {
+            val pendingIAC = oversizedEnvironmentIAC
+            if (pendingIAC != null) {
+                oversizedEnvironmentIAC = if (pendingIAC) { if (input[i] == TC.SE) null else false } else input[i] == TC.IAC
+                i++
+                continue
+            }
             when (input[i]) {
                 TC.IAC -> {
                     val remaining = input.size - i
@@ -275,6 +356,13 @@ class TelnetClientSession(
                 { s, _, _, _ -> s.processDoTtype(); 3 },
             TeloptPattern(byteArrayOf(TC.IAC, TC.SB, TO.TTYPE, TS.ENV_SEND, TC.IAC, TC.SE))
                 { s, _, _, _ -> s.processSbTtypeSend(); 6 },
+
+            TeloptPattern(byteArrayOf(TC.IAC, TC.DO, TO.NEW_ENVIRON))
+                { s, _, _, _ -> s.enableEnvironment(); 3 },
+            TeloptPattern(byteArrayOf(TC.IAC, TC.DONT, TO.NEW_ENVIRON))
+                { s, _, _, _ -> s.disableEnvironment(); 3 },
+            TeloptPattern(byteArrayOf(TC.IAC, TC.SB, TO.NEW_ENVIRON))
+                { s, src, i, n -> s.processEnvironment(src, i, n) },
 
             // Server requests NAWS
             TeloptPattern(byteArrayOf(TC.IAC, TC.DO, TO.NAWS))
@@ -546,7 +634,7 @@ class TelnetClientSession(
         val name = when (ttypeRound) {
             0 -> terminalType
             1 -> "$terminalType-256color"
-            else -> "MTTS 137" // ANSI | VT100 | UTF8 | COLORS_256
+            else -> "MTTS $advertisedMTTS"
         }
         ttypeRound++
 

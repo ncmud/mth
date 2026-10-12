@@ -209,7 +209,7 @@ struct TelnetClientSessionTests {
         _ = s.processInput([TC.IAC, TC.SB, TO.TTYPE, TS.ENV_SEND, TC.IAC, TC.SE])
         d.writtenChunks.removeAll()
         _ = s.processInput([TC.IAC, TC.SB, TO.TTYPE, TS.ENV_SEND, TC.IAC, TC.SE])
-        let expected: [UInt8] = [TC.IAC, TC.SB, TO.TTYPE, TS.ENV_IS] + Array("MTTS 137".utf8) + [TC.IAC, TC.SE]
+        let expected: [UInt8] = [TC.IAC, TC.SB, TO.TTYPE, TS.ENV_IS] + Array("MTTS 649".utf8) + [TC.IAC, TC.SE]
         #expect(d.allWrittenBytes == expected)
     }
 
@@ -487,7 +487,7 @@ struct TelnetClientSessionTests {
         #expect(r2.containsSequence([TC.IAC, TC.WONT, 91]))            // WONT MXP
         #expect(r2.containsSequence([TC.IAC, TC.DO, TO.MSSP]))         // DO MSSP
         #expect(r2.containsSequence([TC.IAC, TC.DONT, 93]))            // DONT unknown(93)
-        #expect(r2.containsSequence([TC.IAC, TC.WONT, 39]))            // WONT NEW_ENVIRON
+        #expect(r2.containsSequence([TC.IAC, TC.WILL, 39]))            // WILL NEW_ENVIRON
 
         // Round 3: SB TTYPE SEND
         d.writtenChunks.removeAll()

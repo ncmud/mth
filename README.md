@@ -21,6 +21,9 @@ TTYPE        - Reports the client's terminal type.
 
 Also includes color code substitution supporting ANSI-16, xterm-256, and true color output.
 
+Swift and Kotlin support MNES client metadata, including forwarded
+IPv4/IPv6 addresses, client identity, and live capability updates.
+
 ## Swift Usage
 
 Add the dependency to your `Package.swift`:

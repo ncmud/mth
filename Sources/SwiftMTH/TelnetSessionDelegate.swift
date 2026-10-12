@@ -41,6 +41,7 @@ public struct GMCPPacket: Sendable {
 /// Replaces the C `descriptor_data` extensibility pattern. The session calls
 /// these methods for I/O and data that the host must provide.
 public protocol TelnetSessionDelegate: AnyObject {
+    func telnetSession(_ session: TelnetSession, environmentChanged environment: MNESEnvironment)
     /// Write raw bytes to the client connection.
     /// The session calls this for all outbound data (telnet negotiations,
     /// MSDP updates, echo control, etc.).
@@ -76,6 +77,7 @@ public protocol TelnetSessionDelegate: AnyObject {
 
 /// Default implementations for optional delegate methods.
 public extension TelnetSessionDelegate {
+    func telnetSession(_ session: TelnetSession, environmentChanged environment: MNESEnvironment) {}
     func telnetSession(_ session: TelnetSession, log message: String) {}
     func telnetSessionMSSPData(_ session: TelnetSession) -> [(key: String, value: String)] { [] }
     func telnetSession(_ session: TelnetSession, gmcpReceived packet: GMCPPacket) {}
