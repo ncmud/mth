@@ -19,16 +19,71 @@ class TelnetSession(
 ) {
     // -- Public State --
 
-    var terminalType: String = ""
+    var ttypeTerminalType: String = ""
         private set
-    var mttsFlags: MTTSFlags = MTTSFlags()
+    var ttypeMTTSFlags: MTTSFlags = MTTSFlags()
         private set
     var windowSize: Pair<Int, Int> = Pair(0, 0)
         private set
-    var commFlags: CommFlags = CommFlags()
+    var baseCommFlags: CommFlags = CommFlags()
         private set
-    var proxy: String = ""
+    private var restoredProxy = ""
+    val proxy: String get() = environment.ipAddress ?: restoredProxy
+    var environment = MNESEnvironment()
         private set
+    var newEnvironEnabled = false
+        private set
+    var hasTTYPEMTTS = false
+        private set
+    val hasMTTS: Boolean get() = environment.mtts != null || hasTTYPEMTTS
+    /** MNES terminal type, falling back to the first TTYPE report. */
+    val terminalType: String get() = environment.terminalType ?: ttypeTerminalType
+    /** MNES MTTS report, falling back to TTYPE MTTS. Use [commFlags] for charset-aware UTF-8 support. */
+    val mttsFlags: MTTSFlags get() = environment.mtts?.let { MTTSFlags(it) } ?: ttypeMTTSFlags
+    /** Effective flags: MNES MTTS overrides base capabilities; MNES CHARSET overrides the UTF-8 bit. */
+    val commFlags: CommFlags get() {
+        var flags = baseCommFlags
+        if (MTTSFlags.UTF8 in ttypeMTTSFlags) flags = flags.insert(CommFlags.UTF8)
+        if (MTTSFlags.COLORS_256 in ttypeMTTSFlags) flags = flags.insert(CommFlags.COLORS_256)
+        environment.mtts?.let {
+            flags = flags.remove(CommFlags.UTF8).remove(CommFlags.COLORS_256)
+            if (it and MTTSFlags.UTF8.rawValue != 0) flags = flags.insert(CommFlags.UTF8)
+            if (it and MTTSFlags.COLORS_256.rawValue != 0) flags = flags.insert(CommFlags.COLORS_256)
+        }
+        environment.charset?.let {
+            flags = flags.remove(CommFlags.UTF8)
+            if (it == "UTF-8") flags = flags.insert(CommFlags.UTF8)
+        }
+        return flags
+    }
+
+    fun restoreEnvironment(environment: MNESEnvironment, enabled: Boolean, hasTTYPEMTTS: Boolean) {
+        this.restoredProxy = ""
+        this.environment = environment.validated
+        this.newEnvironEnabled = enabled
+        this.hasTTYPEMTTS = hasTTYPEMTTS
+    }
+
+    fun requestEnvironment() {
+        if (newEnvironEnabled) {
+            write(NewEnviron.packet(TS.ENV_SEND, emptyList()))
+            write(NewEnviron.packet(TS.ENV_SEND, listOf(NewEnviron.Entry("SYSTEMTYPE"))))
+        } else write(byteArrayOf(TC.IAC, TC.DO, TO.NEW_ENVIRON))
+    }
+
+    fun renegotiateEnvironment() {
+        disableEnvironment()
+        write(byteArrayOf(TC.IAC, TC.DONT, TO.NEW_ENVIRON))
+        write(byteArrayOf(TC.IAC, TC.DO, TO.NEW_ENVIRON))
+    }
+
+    private fun disableEnvironment() {
+        restoredProxy = ""
+        newEnvironEnabled = false
+        val previous = environment
+        environment = MNESEnvironment()
+        if (previous != environment) delegate?.telnetSessionEnvironmentChanged(this, environment)
+    }
 
     /** The MSDP manager for this session. Created lazily when MSDP/GMCP is negotiated. */
     var msdpManager: MSDPManager? = null
@@ -44,6 +99,7 @@ class TelnetSession(
 
     /** Buffer for incomplete telnet sequences (packet fragmentation). */
     private var telbuf: MutableList<Byte> = mutableListOf()
+    private var oversizedEnvironmentIAC: Boolean? = null
 
     /** MCCP2 deflate stream (server->client output compression). */
     private var mccp2: DeflateStream? = null
@@ -67,11 +123,12 @@ class TelnetSession(
         telnetTable: List<TelnetOptionEntry> = defaultTelnetTable,
         msdpTable: List<MSDPVariableDefinition> = defaultMSDPTable
     ) : this(delegate, telnetTable, msdpTable) {
-        this.commFlags = restoringCommFlags
-        this.mttsFlags = mttsFlags
-        this.terminalType = terminalType
+        this.baseCommFlags = restoringCommFlags
+        this.ttypeMTTSFlags = mttsFlags
+        this.hasTTYPEMTTS = mttsFlags.rawValue != 0
+        this.ttypeTerminalType = terminalType
         this.windowSize = windowSize
-        this.proxy = proxy
+        this.restoredProxy = proxy.takeIf { MNESEnvironment.isIPAddress(it) } ?: ""
     }
 
     // -- Connection Lifecycle --
@@ -93,6 +150,7 @@ class TelnetSession(
 
     /** Unannounce support (e.g. before copyover). */
     fun unannounceSupport() {
+        disableEnvironment()
         endMCCP2()
         endMCCP3()
         for (i in 0 until minOf(telnetTable.size, 255)) {
@@ -114,12 +172,12 @@ class TelnetSession(
     }
 
     /** Whether the client negotiated MXP (telnet option 91). */
-    val mxpEnabled: Boolean get() = CommFlags.MXP in commFlags
+    val mxpEnabled: Boolean get() = CommFlags.MXP in baseCommFlags
 
     /** Re-assert MXP after a copyover restore: resends the start command and the
      * locked-default line mode. */
     fun reassertMXP() {
-        if (CommFlags.MXP in commFlags) {
+        if (CommFlags.MXP in baseCommFlags) {
             write(MXP_START)
             write(MXP_LOCKED_DEFAULT)
         }
@@ -127,19 +185,19 @@ class TelnetSession(
 
     /** Send echo-off (password mode). */
     fun sendEchoOff() {
-        commFlags = commFlags.insert(CommFlags.PASSWORD)
+        baseCommFlags = baseCommFlags.insert(CommFlags.PASSWORD)
         write(byteArrayOf(TC.IAC, TC.WILL, TO.ECHO))
     }
 
     /** Send echo-on (normal mode). */
     fun sendEchoOn() {
-        commFlags = commFlags.remove(CommFlags.PASSWORD)
+        baseCommFlags = baseCommFlags.remove(CommFlags.PASSWORD)
         write(byteArrayOf(TC.IAC, TC.WONT, TO.ECHO))
     }
 
     /** Send End-of-Record marker (prompt marker). */
     fun sendEOR() {
-        if (CommFlags.EOR in commFlags) {
+        if (CommFlags.EOR in baseCommFlags) {
             write(byteArrayOf(TC.IAC, TC.EOR))
         }
     }
@@ -151,7 +209,7 @@ class TelnetSession(
 
     /** Send a GMCP packet with the given module name and JSON payload. */
     fun sendGMCP(module: String, json: String) {
-        if (CommFlags.GMCP !in commFlags) return
+        if (CommFlags.GMCP !in baseCommFlags) return
         val packet = mutableListOf<Byte>()
         packet.add(TC.IAC)
         packet.add(TC.SB)
@@ -219,6 +277,12 @@ class TelnetSession(
         var i = 0
 
         while (i < input.size) {
+            val pendingIAC = oversizedEnvironmentIAC
+            if (pendingIAC != null) {
+                oversizedEnvironmentIAC = if (pendingIAC) { if (input[i] == TC.SE) null else false } else input[i] == TC.IAC
+                i++
+                continue
+            }
             when (input[i]) {
                 TC.IAC -> {
                     val remaining = input.size - i
@@ -333,6 +397,8 @@ class TelnetSession(
 
             TeloptPattern(byteArrayOf(TC.IAC, TC.WILL, TO.NEW_ENVIRON))
                 { s, _, _, _ -> s.processWillNewEnviron(); 3 },
+            TeloptPattern(byteArrayOf(TC.IAC, TC.WONT, TO.NEW_ENVIRON))
+                { s, _, _, _ -> s.disableEnvironment(); 3 },
             TeloptPattern(byteArrayOf(TC.IAC, TC.SB, TO.NEW_ENVIRON))
                 { s, src, i, n -> s.processSbNewEnviron(src, i, n) },
 
@@ -441,13 +507,13 @@ class TelnetSession(
     // -- Handler: EOR --
 
     private fun processDoEOR() {
-        commFlags = commFlags.insert(CommFlags.EOR)
+        baseCommFlags = baseCommFlags.insert(CommFlags.EOR)
     }
 
     // -- Handler: Terminal Type --
 
     private fun processWillTtype() {
-        if (terminalType.isEmpty()) {
+        if (ttypeTerminalType.isEmpty()) {
             // Request terminal type 3 times for MTTS detection, then reset
             val request = byteArrayOf(TC.IAC, TC.SB, TO.TTYPE, TS.ENV_SEND, TC.IAC, TC.SE)
             write(request)
@@ -472,21 +538,22 @@ class TelnetSession(
         }
         val value = String(buf.toByteArray(), Charsets.UTF_8)
 
-        if (terminalType.isEmpty()) {
-            terminalType = value
+        if (ttypeTerminalType.isEmpty()) {
+            ttypeTerminalType = value
         } else {
             // Check for MTTS flags
             if (value.uppercase().startsWith("MTTS ")) {
                 val flagStr = value.substring(5).trim()
                 val flags = flagStr.toIntOrNull()
                 if (flags != null) {
-                    mttsFlags = MTTSFlags(flags)
+                    hasTTYPEMTTS = true
+                    ttypeMTTSFlags = MTTSFlags(flags)
 
-                    if (MTTSFlags.COLORS_256 in mttsFlags) {
-                        commFlags = commFlags.insert(CommFlags.COLORS_256)
+                    if (MTTSFlags.COLORS_256 in ttypeMTTSFlags) {
+                        baseCommFlags = baseCommFlags.insert(CommFlags.COLORS_256)
                     }
-                    if (MTTSFlags.UTF8 in mttsFlags) {
-                        commFlags = commFlags.insert(CommFlags.UTF8)
+                    if (MTTSFlags.UTF8 in ttypeMTTSFlags) {
+                        baseCommFlags = baseCommFlags.insert(CommFlags.UTF8)
                     }
                 }
             }
@@ -494,7 +561,7 @@ class TelnetSession(
             // Detect 256-color terminals by name
             val upper = value.uppercase()
             if (upper.contains("-256COLOR") || upper == "XTERM") {
-                commFlags = commFlags.insert(CommFlags.COLORS_256)
+                baseCommFlags = baseCommFlags.insert(CommFlags.COLORS_256)
             }
         }
 
@@ -538,68 +605,33 @@ class TelnetSession(
     // -- Handler: NEW-ENVIRON --
 
     private fun processWillNewEnviron() {
-        val packet = mutableListOf<Byte>()
-        packet.add(TC.IAC)
-        packet.add(TC.SB)
-        packet.add(TO.NEW_ENVIRON)
-        packet.add(TS.ENV_SEND)
-        packet.add(TS.ENV_VAR)
-        packet.addAll("SYSTEMTYPE".toByteArray(Charsets.UTF_8).toList())
-        packet.add(TC.IAC)
-        packet.add(TC.SE)
-        write(packet.toByteArray())
+        if (newEnvironEnabled) return
+        newEnvironEnabled = true
+        requestEnvironment()
     }
 
     private fun processSbNewEnviron(src: ByteArray, offset: Int, srclen: Int): Int {
-        val sbLen = skipSB(src, offset, srclen)
-        if (sbLen > srclen) return srclen + 1
-
-        var varName = ""
-        var j = offset + 4
-        val end = offset + srclen
-        val subCommand = src[offset + 3]
-
-        while (j < end && src[j] != TC.SE) {
-            when (src[j]) {
-                TS.ENV_VAR, TS.ENV_USR -> {
-                    j++
-                    val buf = mutableListOf<Byte>()
-                    while (j < end && (src[j].toInt() and 0xFF) >= 32 && src[j] != TC.IAC) {
-                        buf.add(src[j])
-                        j++
-                    }
-                    varName = String(buf.toByteArray(), Charsets.UTF_8)
-                }
-                TS.ENV_VAL -> {
-                    j++
-                    val buf = mutableListOf<Byte>()
-                    while (j < end && (src[j].toInt() and 0xFF) >= 32 && src[j] != TC.IAC) {
-                        buf.add(src[j])
-                        j++
-                    }
-                    val valName = String(buf.toByteArray(), Charsets.UTF_8)
-
-                    if (subCommand == TS.ENV_IS) {
-                        if (varName.equals("SYSTEMTYPE", ignoreCase = true)
-                            && valName.equals("WIN32", ignoreCase = true)
-                        ) {
-                            if (terminalType.equals("ANSI", ignoreCase = true)) {
-                                commFlags = commFlags.insert(CommFlags.REMOTE_ECHO)
-                                terminalType = "WINDOWS TELNET"
-                            }
-                        }
-                        if (varName.equals("IPADDRESS", ignoreCase = true)) {
-                            proxy = valName
-                        }
-                    }
-                }
-                else -> {
-                    j++
-                }
+        val length = NewEnviron.frameLength(src, offset) ?: run {
+            if (srclen > 8192) {
+                oversizedEnvironmentIAC = src.reversed().takeWhile { it == TC.IAC }.size % 2 == 1
+                return srclen
+            }
+            return srclen + 1
+        }
+        if (!newEnvironEnabled) return length
+        val message = NewEnviron.decode(src.copyOfRange(offset, offset + length)) ?: return length
+        if (message.command != TS.ENV_IS && message.command != TS.ENV_INFO) return length
+        val previous = environment
+        if (message.entries.any { it.name == "IPADDRESS" }) restoredProxy = ""
+        environment = environment.apply(message.entries)
+        for (entry in message.entries) {
+            if (entry.name.equals("SYSTEMTYPE", ignoreCase = true) && entry.value.equals("WIN32", ignoreCase = true) && ttypeTerminalType.equals("ANSI", ignoreCase = true)) {
+                baseCommFlags = baseCommFlags.insert(CommFlags.REMOTE_ECHO)
+                ttypeTerminalType = "WINDOWS TELNET"
             }
         }
-
-        return sbLen
+        if (previous != environment) delegate?.telnetSessionEnvironmentChanged(this, environment)
+        return length
     }
 
     // -- Handler: CHARSET --
@@ -636,11 +668,11 @@ class TelnetSession(
 
             if (subCommand == TS.CHARSET_ACCEPTED) {
                 if (charset.equals("UTF-8", ignoreCase = true)) {
-                    commFlags = commFlags.insert(CommFlags.UTF8)
+                    baseCommFlags = baseCommFlags.insert(CommFlags.UTF8)
                 }
             } else if (subCommand == TS.CHARSET_REJECTED) {
                 if (charset.equals("UTF-8", ignoreCase = true)) {
-                    commFlags = commFlags.remove(CommFlags.UTF8)
+                    baseCommFlags = baseCommFlags.remove(CommFlags.UTF8)
                 }
             }
             j++
@@ -691,7 +723,7 @@ class TelnetSession(
             writeHandler = { data -> write(data) },
             logHandler = { message -> log(message) }
         )
-        msdpManager?.usesGMCP = CommFlags.GMCP in commFlags
+        msdpManager?.usesGMCP = CommFlags.GMCP in baseCommFlags
         msdpManager?.updateVariable("SPECIFICATION", "http://tintin.sourceforge.net/msdp")
     }
 
@@ -748,21 +780,21 @@ class TelnetSession(
     // -- Handler: MXP --
 
     private fun processDoMxp() {
-        if (CommFlags.MXP in commFlags) return
-        commFlags = commFlags.insert(CommFlags.MXP)
+        if (CommFlags.MXP in baseCommFlags) return
+        baseCommFlags = baseCommFlags.insert(CommFlags.MXP)
         write(MXP_START)
         write(MXP_LOCKED_DEFAULT)
         log("INFO MXP ENABLED")
     }
 
     private fun processDontMxp() {
-        commFlags = commFlags.remove(CommFlags.MXP)
+        baseCommFlags = baseCommFlags.remove(CommFlags.MXP)
     }
 
     // -- Handler: GMCP --
 
     private fun processDoGmcp() {
-        commFlags = commFlags.insert(CommFlags.GMCP)
+        baseCommFlags = baseCommFlags.insert(CommFlags.GMCP)
         if (msdpManager != null) {
             msdpManager?.usesGMCP = true
             log("INFO GMCP ENABLED (MSDP already active)")
@@ -855,7 +887,7 @@ class TelnetSession(
         val stream = mccp2 ?: return
 
         // Flush remaining compressed data
-        if (CommFlags.DISCONNECT !in commFlags) {
+        if (CommFlags.DISCONNECT !in baseCommFlags) {
             val final = stream.finish()
             if (final != null) {
                 delegate?.telnetSessionWrite(this, final)

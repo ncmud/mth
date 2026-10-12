@@ -290,7 +290,7 @@ class TelnetClientSessionTest {
         d.writtenChunks.clear()
         s.processInput(byteArrayOf(IAC, SB, TTYPE, ENV_SEND, IAC, SE))
 
-        val expected = byteArrayOf(IAC, SB, TTYPE, ENV_IS) + textBytes("MTTS 137") + byteArrayOf(IAC, SE)
+        val expected = byteArrayOf(IAC, SB, TTYPE, ENV_IS) + textBytes("MTTS 649") + byteArrayOf(IAC, SE)
         assertContentEquals(expected, d.allWrittenBytes)
     }
 
@@ -589,7 +589,7 @@ class TelnetClientSessionTest {
         assertTrue(r2.containsSequence(byteArrayOf(IAC, WONT, 91.toByte())))  // MXP
         assertTrue(r2.containsSequence(byteArrayOf(IAC, DO, MSSP)))
         assertTrue(r2.containsSequence(byteArrayOf(IAC, DONT, 93.toByte()))) // unknown
-        assertTrue(r2.containsSequence(byteArrayOf(IAC, WONT, 39)))          // NEW_ENVIRON
+        assertTrue(r2.containsSequence(byteArrayOf(IAC, WILL, 39)))          // NEW_ENVIRON
 
         // Round 3: SB TTYPE SEND
         d.writtenChunks.clear()

@@ -9,10 +9,30 @@ public final class TelnetClientSession {
     // MARK: - Public State
 
     public weak var delegate: (any TelnetClientDelegate)?
-    public var terminalType: String
+    public var terminalType: String { didSet { publishEnvironment() } }
     public var windowWidth: Int
     public var windowHeight: Int
-    public let mttsFlags: Int
+    public var mttsFlags: Int { didSet { publishEnvironment() } }
+    public var clientName: String? { didSet { publishEnvironment() } }
+    public var clientVersion: String? { didSet { publishEnvironment() } }
+    public var charset: String? { didSet { publishEnvironment() } }
+    public var ipAddress: String? { didSet { publishEnvironment() } }
+    public var newEnvironEnabled: Bool { clientOptions.contains(TO.NEW_ENVIRON) }
+    private var requestedEnvironment: [String: Bool] = [:]
+    private var lastEnvironment: [String: String] = [:]
+    private var advertisedMTTS: Int {
+        var flags = mttsFlags | MTTSFlags.mnes.rawValue
+        if let charset {
+            flags &= ~MTTSFlags.utf8.rawValue
+            if charset.uppercased() == "UTF-8" { flags |= MTTSFlags.utf8.rawValue }
+        }
+        return flags
+    }
+    private var environment: MNESEnvironment {
+        MNESEnvironment(clientName: clientName ?? terminalType, clientVersion: clientVersion,
+                        charset: charset ?? (mttsFlags & MTTSFlags.utf8.rawValue != 0 ? "UTF-8" : "ASCII"),
+                        ipAddress: ipAddress, mtts: advertisedMTTS, terminalType: terminalType).validated
+    }
 
     #if canImport(CZlib)
     public var isMCCP2Active: Bool { mccp2 != nil }
@@ -29,6 +49,7 @@ public final class TelnetClientSession {
     // MARK: - Private State
 
     private var telbuf: [UInt8] = []
+    private var oversizedEnvironmentIAC: Bool?
     private var serverOptions: Set<UInt8> = []
     private var clientOptions: Set<UInt8> = []
     private var ttypeRound: Int = 0
@@ -45,13 +66,21 @@ public final class TelnetClientSession {
         terminalType: String = "MTH",
         windowWidth: Int = 80,
         windowHeight: Int = 24,
-        mttsFlags: Int = 137
+        mttsFlags: Int = 137,
+        clientName: String? = nil,
+        clientVersion: String? = nil,
+        charset: String? = nil,
+        ipAddress: String? = nil
     ) {
         self.delegate = delegate
         self.terminalType = terminalType
         self.windowWidth = windowWidth
         self.windowHeight = windowHeight
         self.mttsFlags = mttsFlags
+        self.clientName = clientName
+        self.clientVersion = clientVersion
+        self.charset = charset
+        self.ipAddress = ipAddress
     }
 
     // MARK: - Public API
@@ -73,6 +102,58 @@ public final class TelnetClientSession {
         packet.append(TC.IAC)
         packet.append(TC.SE)
         write(packet)
+    }
+
+    private func enableEnvironment() {
+        if clientOptions.insert(TO.NEW_ENVIRON).inserted {
+            write([TC.IAC, TC.WILL, TO.NEW_ENVIRON])
+        }
+    }
+
+    private func disableEnvironment() {
+        if clientOptions.remove(TO.NEW_ENVIRON) != nil {
+            write([TC.IAC, TC.WONT, TO.NEW_ENVIRON])
+        }
+        requestedEnvironment = [:]
+        lastEnvironment = [:]
+    }
+
+    private func processEnvironment(_ src: [UInt8], at offset: Int, remaining: Int) -> Int {
+        guard let length = NewEnviron.frameLength(src, at: offset) else {
+            if remaining > 8192 {
+                oversizedEnvironmentIAC = src.reversed().prefix(while: { $0 == TC.IAC }).count % 2 == 1
+                return remaining
+            }
+            return remaining + 1
+        }
+        guard newEnvironEnabled,
+              let message = NewEnviron.decode(Array(src[offset..<offset + length])),
+              message.command == TS.ENV_SEND,
+              message.entries.allSatisfy({ $0.value == nil }) else { return length }
+        let requests = message.entries.isEmpty ? [NewEnviron.Entry(name: "")] : message.entries
+        let entries = requests.flatMap { entry in
+            entry.name.isEmpty
+                ? MNESEnvironment.variableNames.map { NewEnviron.Entry(name: $0, userDefined: entry.userDefined) }
+                : [entry]
+        }
+        let variables = environment.variables
+        for entry in entries {
+            if MNESEnvironment.variableNames.contains(entry.name) { requestedEnvironment[entry.name] = entry.userDefined }
+            lastEnvironment[entry.name] = variables[entry.name]
+        }
+        write(NewEnviron.packet(command: TS.ENV_IS, entries: entries.map {
+            .init(name: $0.name, value: variables[$0.name], userDefined: $0.userDefined)
+        }))
+        return length
+    }
+
+    private func publishEnvironment() {
+        guard newEnvironEnabled else { return }
+        let variables = environment.variables
+        let changed = requestedEnvironment.keys.sorted().filter { variables[$0] != lastEnvironment[$0] }
+        guard !changed.isEmpty else { return }
+        for name in changed { lastEnvironment[name] = variables[name] }
+        write(NewEnviron.packet(command: TS.ENV_INFO, entries: changed.map { .init(name: $0, value: variables[$0], userDefined: requestedEnvironment[$0] ?? false) }))
     }
 
     // MARK: - Input Processing
@@ -108,6 +189,11 @@ public final class TelnetClientSession {
 
         var i = 0
         while i < input.count {
+            if let pendingIAC = oversizedEnvironmentIAC {
+                oversizedEnvironmentIAC = pendingIAC ? (input[i] == TC.SE ? nil : false) : input[i] == TC.IAC
+                i += 1
+                continue
+            }
             switch input[i] {
             case TC.IAC:
                 let remaining = input.count - i
@@ -224,6 +310,13 @@ public final class TelnetClientSession {
                           handler: { s, _, _, _ in s.processDoTtype(); return 3 }),
             TeloptPattern(pattern: [TC.IAC, TC.SB, TO.TTYPE, TS.ENV_SEND, TC.IAC, TC.SE],
                           handler: { s, _, _, _ in s.processSbTtypeSend(); return 6 }),
+
+            TeloptPattern(pattern: [TC.IAC, TC.DO, TO.NEW_ENVIRON],
+                          handler: { s, _, _, _ in s.enableEnvironment(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.DONT, TO.NEW_ENVIRON],
+                          handler: { s, _, _, _ in s.disableEnvironment(); return 3 }),
+            TeloptPattern(pattern: [TC.IAC, TC.SB, TO.NEW_ENVIRON],
+                          handler: { s, src, i, n in s.processEnvironment(src, at: i, remaining: n) }),
 
             // NAWS
             TeloptPattern(pattern: [TC.IAC, TC.DO, TO.NAWS],
@@ -517,7 +610,7 @@ public final class TelnetClientSession {
         case 1:
             name = "\(terminalType)-256color"
         default:
-            name = "MTTS \(mttsFlags)"
+            name = "MTTS \(advertisedMTTS)"
         }
         ttypeRound += 1
 
